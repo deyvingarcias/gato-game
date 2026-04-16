@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Gato Game</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="gameWrap">
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="hud">
+      <div id="titleCard" class="panel">
+        <h1>🐱 Gato Game</h1>
+        <p>Haz clic sobre el gato y arrástralo. Intenta pasarlo por el hueco. Cuanto más lo aprietes, peor le va.</p>
+      </div>
+
+      <div id="statsCard" class="panel">
+        <div class="statRow">
+          <span>Integridad del gato</span>
+          <span id="lifeText">100%</span>
+        </div>
+        <div class="barWrap">
+          <div id="lifeBar"></div>
+        </div>
+        <div id="hint">Aplástalo contra la pared y se le saldrán los ojos.</div>
+      </div>
+    </div>
+
+    <div class="centerLabel">GATO GAME</div>
+
+    <div id="gameOver">
+      <div class="box">
+        <h2>☠ GAME OVER</h2>
+        <p>El gato no pudo más.<br>La física fue más cruel que tú.</p>
+        <button id="restartBtn">Reintentar</button>
+      </div>
+    </div>
+
+    <button id="muteBtn">🔊 Sonido</button>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.20.0/matter.min.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
