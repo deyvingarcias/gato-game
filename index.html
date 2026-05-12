@@ -10,74 +10,46 @@
   <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --ui-color: #8a7a6a;
-      --font: 'Fredoka', sans-serif;
-    }
-
     html, body {
-      width: 100%; height: 100%;
-      overflow: hidden;
+      width: 100%; height: 100%; overflow: hidden;
       touch-action: none;
-      background: linear-gradient(to bottom, #f5ede0, #e8d5c0);
-      font-family: var(--font);
+      background: #f0e6d3;
+      font-family: 'Fredoka', sans-serif;
     }
-
     #main-canvas {
-      position: absolute; inset: 0;
-      width: 100%; height: 100%;
-      display: block;
+      position: absolute; inset: 0; width: 100%; height: 100%; display: block;
     }
-
     #bloom-canvas {
-      position: absolute; inset: 0;
-      width: 100%; height: 100%;
-      display: block;
-      pointer-events: none;
-      mix-blend-mode: screen;
-      opacity: 0.45;
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      display: block; pointer-events: none;
+      mix-blend-mode: screen; opacity: 0.5;
     }
-
     #ui {
       position: absolute; top: 0; left: 0; right: 0;
       display: flex; justify-content: space-between; align-items: center;
-      padding: 18px 20px;
-      pointer-events: none;
+      padding: 18px 22px; pointer-events: none;
     }
-
     #wordmark {
-      font-size: 1.25rem; font-weight: 600;
-      color: var(--ui-color);
-      letter-spacing: 0.04em; opacity: 0.85;
+      font-size: 1.2rem; font-weight: 600;
+      color: #8a7560; letter-spacing: 0.05em; opacity: 0.8;
     }
-
     #share-btn {
-      pointer-events: all;
-      background: none; border: none; cursor: pointer;
-      color: var(--ui-color); opacity: 0.7;
-      padding: 8px; border-radius: 50%;
-      display: flex; align-items: center;
-      transition: opacity 0.2s;
+      pointer-events: all; background: none; border: none; cursor: pointer;
+      color: #8a7560; opacity: 0.65; padding: 8px; border-radius: 50%;
+      display: flex; align-items: center; transition: opacity 0.2s;
     }
     #share-btn:hover { opacity: 1; }
-
     #hint {
-      position: absolute; bottom: 40px; left: 50%;
-      transform: translateX(-50%);
-      color: var(--ui-color); font-size: 0.9rem;
-      opacity: 0; pointer-events: none;
-      text-align: center;
-      transition: opacity 1.5s ease;
-      white-space: nowrap;
+      position: absolute; bottom: 38px; left: 50%; transform: translateX(-50%);
+      color: #8a7560; font-size: 0.88rem; opacity: 0; pointer-events: none;
+      transition: opacity 1.8s ease; white-space: nowrap;
     }
-    #hint.visible { opacity: 0.55; }
+    #hint.visible { opacity: 0.5; }
   </style>
 </head>
 <body>
   <canvas id="main-canvas"></canvas>
   <canvas id="bloom-canvas"></canvas>
-
   <div id="ui">
     <div id="wordmark">squishpets</div>
     <button id="share-btn" aria-label="Share">
@@ -88,34 +60,28 @@
       </svg>
     </button>
   </div>
-
   <div id="hint">Try petting the head...</div>
 
 <script>
 'use strict';
 console.log("Hi, I'm Pinxu 🖤");
 
-/* =====================================================================
+/* ═══════════════════════════════════════════════════════════════════
    VERLET ENGINE
-   ===================================================================== */
+═══════════════════════════════════════════════════════════════════ */
 
-const VERLET_DAMPING    = 0.98;
-const VERLET_ITERATIONS = 8;
+const V_DAMPING    = 0.985;
+const V_ITERATIONS = 10;
 
 class Point {
   constructor(x, y, pinned) {
-    this.x = x; this.y = y;
-    this.oldX = x; this.oldY = y;
-    this.pinned = !!pinned;
+    this.x = x; this.y = y; this.oldX = x; this.oldY = y; this.pinned = !!pinned;
   }
-  applyImpulse(dx, dy) {
+  applyImpulse(dx, dy) { if (!this.pinned) { this.oldX -= dx; this.oldY -= dy; } }
+  integrate() {
     if (this.pinned) return;
-    this.oldX -= dx; this.oldY -= dy;
-  }
-  integrate(dt) {
-    if (this.pinned) return;
-    const vx = (this.x - this.oldX) * VERLET_DAMPING;
-    const vy = (this.y - this.oldY) * VERLET_DAMPING;
+    const vx = (this.x - this.oldX) * V_DAMPING;
+    const vy = (this.y - this.oldY) * V_DAMPING;
     this.oldX = this.x; this.oldY = this.y;
     this.x += vx; this.y += vy;
   }
@@ -124,16 +90,14 @@ class Point {
 class Constraint {
   constructor(p1, p2, stiffness) {
     this.p1 = p1; this.p2 = p2;
-    this.restLength = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-    this.stiffness = stiffness || 1;
+    this.rest = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    this.k = stiffness || 1;
   }
   satisfy() {
-    const dx = this.p2.x - this.p1.x;
-    const dy = this.p2.y - this.p1.y;
-    const dist = Math.hypot(dx, dy) || 0.0001;
-    const diff = (dist - this.restLength) / dist * this.stiffness;
-    const ox = dx * diff * 0.5;
-    const oy = dy * diff * 0.5;
+    const dx = this.p2.x - this.p1.x, dy = this.p2.y - this.p1.y;
+    const d = Math.hypot(dx, dy) || 1e-4;
+    const diff = ((d - this.rest) / d) * this.k * 0.5;
+    const ox = dx * diff, oy = dy * diff;
     if (!this.p1.pinned) { this.p1.x += ox; this.p1.y += oy; }
     if (!this.p2.pinned) { this.p2.x -= ox; this.p2.y -= oy; }
   }
@@ -141,692 +105,655 @@ class Constraint {
 
 class VerletBody {
   constructor() { this.points = []; this.constraints = []; }
-  addPoint(x, y, pinned) {
-    const p = new Point(x, y, pinned);
-    this.points.push(p);
-    return p;
+  add(x, y, pinned) { const p = new Point(x, y, pinned); this.points.push(p); return p; }
+  link(a, b, k)     { const c = new Constraint(a, b, k); this.constraints.push(c); return c; }
+  update() {
+    for (const p of this.points) p.integrate();
+    for (let i = 0; i < V_ITERATIONS; i++) for (const c of this.constraints) c.satisfy();
   }
-  addConstraint(p1, p2, stiffness) {
-    const c = new Constraint(p1, p2, stiffness);
-    this.constraints.push(c);
-    return c;
-  }
-  update(dt) {
-    for (const p of this.points) p.integrate(dt);
-    for (let i = 0; i < VERLET_ITERATIONS; i++)
-      for (const c of this.constraints) c.satisfy();
-  }
-  squishAt(px, py, radius, strength) {
+  squishAt(px, py, r, strength) {
     for (const p of this.points) {
-      const dx = p.x - px, dy = p.y - py;
-      const dist = Math.hypot(dx, dy);
-      if (dist < radius && dist > 0.001) {
-        const force = (1 - dist / radius) * strength;
-        p.applyImpulse((dx / dist) * force, (dy / dist) * force);
-      }
+      const dx = p.x - px, dy = p.y - py, d = Math.hypot(dx, dy);
+      if (d < r && d > 1e-3) { const f = (1 - d / r) * strength; p.applyImpulse(dx / d * f, dy / d * f); }
+    }
+  }
+  pullAt(px, py, r, strength) {
+    for (const p of this.points) {
+      const dx = px - p.x, dy = py - p.y, d = Math.hypot(dx, dy);
+      if (d < r && d > 1e-3) { const f = (1 - d / r) * strength; p.applyImpulse(-dx / d * f, -dy / d * f); }
     }
   }
 }
 
-/* =====================================================================
+/* ═══════════════════════════════════════════════════════════════════
    MOOD STATE MACHINE
-   ===================================================================== */
+═══════════════════════════════════════════════════════════════════ */
 
-const MOOD_STATES = ['sleeping','drowsy','awake','content','happy','ecstatic'];
-const MOOD_IDX    = {};
-MOOD_STATES.forEach(function(s, i) { MOOD_IDX[s] = i; });
+const MOODS    = ['sleeping','drowsy','awake','content','happy','ecstatic'];
+const MOOD_IDX = {};
+MOODS.forEach(function(s,i){ MOOD_IDX[s]=i; });
 
 class MoodState {
   constructor() {
-    this.mood = 'drowsy';
-    this.happiness = 1;
-    this._lastInteraction = performance.now();
-    this._wokenOnce = false;
+    this.mood = 'drowsy'; this.happiness = 1;
+    this._last = performance.now(); this._woken = false;
   }
-  interact(delta) {
-    this._lastInteraction = performance.now();
-    if (!this._wokenOnce) { this._wokenOnce = true; this.mood = 'awake'; }
-    this.happiness = Math.min(5, this.happiness + (delta || 1) * 0.15);
-    this._updateMood();
+  interact(d) {
+    this._last = performance.now();
+    if (!this._woken) { this._woken = true; }
+    this.happiness = Math.min(5, this.happiness + (d||1) * 0.18);
+    this._sync();
   }
   update() {
-    const idle = performance.now() - this._lastInteraction;
-    if (idle > 2000) this.happiness = Math.max(0, this.happiness - 0.002);
-    if (idle > 5000  && MOOD_IDX[this.mood] >= MOOD_IDX['awake']) this.mood = 'drowsy';
-    if (idle > 10000) this.mood = 'sleeping';
-    this._updateMood();
+    const idle = performance.now() - this._last;
+    if (idle > 2500)  this.happiness = Math.max(0, this.happiness - 0.0018);
+    if (idle > 6000  && MOOD_IDX[this.mood] >= MOOD_IDX['awake']) this.mood = 'drowsy';
+    if (idle > 12000) this.mood = 'sleeping';
+    this._sync();
   }
-  _updateMood() {
+  _sync() {
     const h = this.happiness;
-    if (h < 0.5)  { if (this.mood !== 'sleeping') this.mood = 'drowsy'; }
-    else if (h < 1.5) { if (this._wokenOnce) this.mood = 'awake'; }
-    else if (h < 2.5) this.mood = 'content';
-    else if (h < 3.5) this.mood = 'happy';
-    else              this.mood = 'ecstatic';
+    if      (!this._woken)  this.mood = 'drowsy';
+    else if (h < 0.4)       { if (this.mood !== 'sleeping') this.mood = 'drowsy'; }
+    else if (h < 1.4)       this.mood = 'awake';
+    else if (h < 2.4)       this.mood = 'content';
+    else if (h < 3.6)       this.mood = 'happy';
+    else                    this.mood = 'ecstatic';
   }
-  get purrVolume() {
-    return [0, 0, 0.15, 0.4, 0.7, 1.0][MOOD_IDX[this.mood] || 0];
-  }
-  get breathRate() {
-    return [0.4, 0.5, 0.55, 0.6, 0.75, 1.0][MOOD_IDX[this.mood] || 0];
-  }
-  get spawnHearts() {
-    return MOOD_IDX[this.mood] >= MOOD_IDX['content'];
-  }
+  get idx()         { return MOOD_IDX[this.mood] || 0; }
+  get purrVol()     { return [0, 0, 0.12, 0.38, 0.68, 1.0][this.idx]; }
+  get breathRate()  { return [0.38, 0.48, 0.54, 0.60, 0.76, 1.02][this.idx]; }
+  get spawnHearts() { return this.idx >= MOOD_IDX['content']; }
 }
 
-/* =====================================================================
+/* ═══════════════════════════════════════════════════════════════════
    AUDIO
-   ===================================================================== */
+═══════════════════════════════════════════════════════════════════ */
 
-var _audioCtx = null;
-
-function getAudioCtx() {
-  if (!_audioCtx) {
-    _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  }
-  return _audioCtx;
+var _actx = null;
+function getAC() {
+  if (!_actx) _actx = new (window.AudioContext || window.webkitAudioContext)();
+  return _actx;
 }
-
-function unlockAudio() {
-  const ctx = getAudioCtx();
-  if (ctx.state === 'suspended') ctx.resume();
-  return ctx;
-}
+function unlockAudio() { const c = getAC(); if (c.state === 'suspended') c.resume(); }
 
 function playBloop() {
-  const ctx = getAudioCtx();
-  const osc    = ctx.createOscillator();
-  const gain   = ctx.createGain();
-  const filter = ctx.createBiquadFilter();
-
-  osc.type = 'sine';
-  osc.frequency.setValueAtTime(220, ctx.currentTime);
-  osc.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.2);
-
-  gain.gain.setValueAtTime(0.35, ctx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.28);
-
-  filter.type = 'lowpass';
-  filter.frequency.value = 400;
-
-  osc.connect(filter);
-  filter.connect(gain);
-  gain.connect(ctx.destination);
-  osc.start(ctx.currentTime);
-  osc.stop(ctx.currentTime + 0.3);
+  const c = getAC(), t = c.currentTime;
+  const o = c.createOscillator(), g = c.createGain(), f = c.createBiquadFilter();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(220, t);
+  o.frequency.exponentialRampToValueAtTime(78, t + 0.22);
+  f.type = 'lowpass'; f.frequency.value = 380;
+  g.gain.setValueAtTime(0.38, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+  o.connect(f); f.connect(g); g.connect(c.destination);
+  o.start(t); o.stop(t + 0.32);
 }
 
 function playMrrp() {
-  const ctx  = getAudioCtx();
-  const osc  = ctx.createOscillator();
-  const gain = ctx.createGain();
-  const lfo  = ctx.createOscillator();
-  const lfoG = ctx.createGain();
-
-  osc.type = 'triangle';
-  osc.frequency.setValueAtTime(600, ctx.currentTime);
-  osc.frequency.exponentialRampToValueAtTime(400, ctx.currentTime + 0.15);
-
-  lfo.frequency.value = 18; lfoG.gain.value = 12;
-  lfo.connect(lfoG); lfoG.connect(osc.frequency);
-  lfo.start(ctx.currentTime); lfo.stop(ctx.currentTime + 0.15);
-
-  gain.gain.setValueAtTime(0.25, ctx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
-
-  osc.connect(gain); gain.connect(ctx.destination);
-  osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.18);
+  const c = getAC(), t = c.currentTime;
+  const o = c.createOscillator(), g = c.createGain();
+  const lfo = c.createOscillator(), lg = c.createGain();
+  o.type = 'triangle';
+  o.frequency.setValueAtTime(580, t); o.frequency.exponentialRampToValueAtTime(380, t + 0.16);
+  lfo.frequency.value = 20; lg.gain.value = 14;
+  lfo.connect(lg); lg.connect(o.frequency); lfo.start(t); lfo.stop(t+0.16);
+  g.gain.setValueAtTime(0.22, t); g.gain.exponentialRampToValueAtTime(0.001, t+0.19);
+  o.connect(g); g.connect(c.destination); o.start(t); o.stop(t+0.2);
 }
 
 function playTch() {
-  const ctx    = getAudioCtx();
-  const sr     = ctx.sampleRate;
-  const buf    = ctx.createBuffer(1, Math.floor(sr * 0.03), sr);
-  const data   = buf.getChannelData(0);
-  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const c = getAC(), t = c.currentTime;
+  const sr = c.sampleRate, len = Math.floor(sr * 0.032);
+  const buf = c.createBuffer(1, len, sr), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = Math.random()*2-1;
+  const src = c.createBufferSource(); src.buffer = buf;
+  const f = c.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 2200;
+  const g = c.createGain(); g.gain.setValueAtTime(0.07, t); g.gain.exponentialRampToValueAtTime(0.001, t+0.04);
+  src.connect(f); f.connect(g); g.connect(c.destination); src.start(t);
+}
 
-  const src    = ctx.createBufferSource();
-  src.buffer   = buf;
-  const filter = ctx.createBiquadFilter();
-  filter.type  = 'highpass'; filter.frequency.value = 2000;
-  const gain   = ctx.createGain();
-  gain.gain.setValueAtTime(0.08, ctx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.035);
-
-  src.connect(filter); filter.connect(gain); gain.connect(ctx.destination);
-  src.start();
+function playSwish(speed) {
+  const c = getAC(), t = c.currentTime;
+  const sr = c.sampleRate, len = Math.floor(sr * 0.12);
+  const buf = c.createBuffer(1, len, sr), d = buf.getChannelData(0);
+  let last = 0;
+  for (let i = 0; i < len; i++) { last = (last + 0.04*(Math.random()*2-1))/1.04; d[i] = last*4; }
+  const src = c.createBufferSource(); src.buffer = buf;
+  const f = c.createBiquadFilter(); f.type = 'bandpass';
+  f.frequency.setValueAtTime(600 + speed*8, t); f.frequency.linearRampToValueAtTime(300, t+0.12);
+  f.Q.value = 1.2;
+  const g = c.createGain(); const vol = Math.min(0.18, speed * 0.006);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t+0.14);
+  src.connect(f); f.connect(g); g.connect(c.destination); src.start(t);
 }
 
 class PurringEngine {
-  constructor() { this._running = false; this._master = null; this._volume = 0; this._targetVolume = 0; }
-
+  constructor() { this._on = false; this._master = null; this._vol = 0; this._target = 0; }
   start() {
-    if (this._running) return;
-    const ctx = getAudioCtx();
-    this._running = true;
-
-    const master = ctx.createGain();
-    master.gain.value = 0;
-    master.connect(ctx.destination);
+    if (this._on) return;
+    this._on = true;
+    const c = getAC();
+    const master = c.createGain(); master.gain.value = 0; master.connect(c.destination);
     this._master = master;
-
-    // Harmonics: 25, 50, 75, 100 Hz
-    const freqs = [25, 50, 75, 100];
-    const amps  = [1.0, 0.5, 0.3, 0.2];
+    const freqs = [25, 50, 75, 100], amps = [1.0, 0.5, 0.28, 0.16];
     freqs.forEach(function(f, i) {
-      const o = ctx.createOscillator();
-      const g = ctx.createGain();
-      o.type = 'sine'; o.frequency.value = f;
-      g.gain.value = amps[i] * 0.15;
+      const o = c.createOscillator(), g = c.createGain();
+      o.type = 'sine'; o.frequency.value = f; g.gain.value = amps[i] * 0.14;
       o.connect(g); g.connect(master); o.start();
     });
-
-    // Inhale/exhale LFO 1.5 Hz
-    const lfo = ctx.createOscillator();
-    const lfoG = ctx.createGain();
-    lfo.frequency.value = 1.5; lfoG.gain.value = 0.4;
-    lfo.connect(lfoG); lfoG.connect(master.gain); lfo.start();
-
-    // Throaty noise texture
-    const noiseLen = ctx.sampleRate * 2;
-    const noiseBuf = ctx.createBuffer(1, noiseLen, ctx.sampleRate);
-    const nd = noiseBuf.getChannelData(0);
-    for (let i = 0; i < noiseLen; i++) nd[i] = Math.random() * 2 - 1;
-    const noiseLoop = ctx.createBufferSource();
-    noiseLoop.buffer = noiseBuf; noiseLoop.loop = true;
-    const nbp = ctx.createBiquadFilter();
-    nbp.type = 'bandpass'; nbp.frequency.value = 800; nbp.Q.value = 0.8;
-    const nGain = ctx.createGain(); nGain.gain.value = 0.025;
-    noiseLoop.connect(nbp); nbp.connect(nGain); nGain.connect(master);
-    noiseLoop.start();
-
-    // Ambient pink noise bed
-    const ambBuf = ctx.createBuffer(1, noiseLen, ctx.sampleRate);
-    const ab = ambBuf.getChannelData(0);
-    let last = 0;
-    for (let i = 0; i < noiseLen; i++) {
-      last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02;
-      ab[i] = last * 3.5;
-    }
-    const amb = ctx.createBufferSource(); amb.buffer = ambBuf; amb.loop = true;
-    const aG = ctx.createGain(); aG.gain.value = 0.006;
-    amb.connect(aG); aG.connect(ctx.destination); amb.start();
+    const lfo = c.createOscillator(), lg = c.createGain();
+    lfo.frequency.value = 1.5; lg.gain.value = 0.38;
+    lfo.connect(lg); lg.connect(master.gain); lfo.start();
+    // Noise texture
+    const nlen = c.sampleRate * 2, nb = c.createBuffer(1, nlen, c.sampleRate), nd = nb.getChannelData(0);
+    for (let i = 0; i < nlen; i++) nd[i] = Math.random()*2-1;
+    const nl = c.createBufferSource(); nl.buffer = nb; nl.loop = true;
+    const nf = c.createBiquadFilter(); nf.type = 'bandpass'; nf.frequency.value = 700; nf.Q.value = 0.9;
+    const ng = c.createGain(); ng.gain.value = 0.022;
+    nl.connect(nf); nf.connect(ng); ng.connect(master); nl.start();
+    // Ambient bed
+    const ab = c.createBuffer(1, nlen, c.sampleRate), ad = ab.getChannelData(0); let lv = 0;
+    for (let i = 0; i < nlen; i++) { lv = (lv + 0.02*(Math.random()*2-1))/1.02; ad[i] = lv*3.5; }
+    const al = c.createBufferSource(); al.buffer = ab; al.loop = true;
+    const ag = c.createGain(); ag.gain.value = 0.005;
+    al.connect(ag); ag.connect(c.destination); al.start();
   }
-
-  setVolume(v) { this._targetVolume = Math.max(0, Math.min(1, v)); }
-
+  setVol(v) { this._target = Math.max(0, Math.min(1, v)); }
   update(dt) {
     if (!this._master) return;
-    this._volume += (this._targetVolume - this._volume) * Math.min(1, dt * 2);
-    this._master.gain.value = this._volume * 0.6;
+    this._vol += (this._target - this._vol) * Math.min(1, dt * 2.2);
+    this._master.gain.value = this._vol * 0.62;
   }
 }
 
-/* =====================================================================
+/* ═══════════════════════════════════════════════════════════════════
    PARTICLE SYSTEM
-   ===================================================================== */
-
-const MAX_PARTICLES  = 30;
-const HEART_LIFETIME = 2000;
+═══════════════════════════════════════════════════════════════════ */
 
 class Particle {
-  constructor() { this.active = false; }
-  init(x, y, type) {
+  constructor() { this.alive = false; }
+  spawn(x, y) {
     this.x = x; this.y = y;
-    this.vx = (Math.random() - 0.5) * 1.2;
-    this.vy = -1.5 - Math.random() * 1.0;
-    this.type    = type || 'heart';
-    this.life    = 0;
-    this.maxLife = HEART_LIFETIME;
-    this.scale   = 0.5 + Math.random() * 0.5;
-    this.rotation = Math.random() * Math.PI * 2;
-    this.active  = true;
+    this.vx = (Math.random()-0.5)*1.4; this.vy = -1.8 - Math.random()*1.2;
+    this.life = 0; this.maxLife = 1800 + Math.random()*600;
+    this.scale = 0.55 + Math.random()*0.55; this.rot = Math.random()*Math.PI*2;
+    this.alive = true;
   }
 }
 
-class ParticleSystem {
-  constructor() {
-    this._pool = [];
-    for (let i = 0; i < MAX_PARTICLES; i++) this._pool.push(new Particle());
-  }
-  spawn(x, y, type) {
-    const p = this._pool.find(function(p) { return !p.active; });
-    if (p) p.init(x, y, type);
-  }
+class Particles {
+  constructor() { this._pool = Array.from({length:30}, ()=>new Particle()); }
+  emit(x, y) { const p = this._pool.find(p=>!p.alive); if (p) p.spawn(x, y); }
   update(dt) {
-    const dtMs = dt * 1000;
+    const ms = dt*1000;
     for (const p of this._pool) {
-      if (!p.active) continue;
-      p.life += dtMs;
-      if (p.life >= p.maxLife) { p.active = false; continue; }
-      p.x += p.vx; p.y += p.vy;
-      p.vy += 0.015;
-      p.rotation += 0.02;
+      if (!p.alive) continue;
+      p.life += ms;
+      if (p.life >= p.maxLife) { p.alive = false; continue; }
+      p.x += p.vx; p.y += p.vy; p.vy += 0.018; p.rot += 0.022;
     }
   }
   draw(ctx) {
     for (const p of this._pool) {
-      if (!p.active) continue;
-      const alpha = 1 - p.life / p.maxLife;
+      if (!p.alive) continue;
+      const t = p.life / p.maxLife;
+      const alpha = t < 0.15 ? t/0.15 : 1 - (t-0.15)/0.85;
+      const sc = p.scale * (1 + Math.sin(t*Math.PI)*0.25);
       ctx.save();
-      ctx.globalAlpha = alpha * 0.85;
-      ctx.translate(p.x, p.y);
-      ctx.rotate(p.rotation);
-      ctx.scale(p.scale, p.scale);
-      if (p.type === 'heart') {
-        ctx.beginPath();
-        ctx.moveTo(0, -5);
-        ctx.bezierCurveTo(-8, -14, -18, -5, 0, 5);
-        ctx.bezierCurveTo(18, -5, 8, -14, 0, -5);
-        ctx.closePath();
-        ctx.fillStyle = '#ff85a1';
-        ctx.fill();
-      }
+      ctx.globalAlpha = alpha * 0.88;
+      ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.scale(sc, sc);
+      ctx.beginPath();
+      ctx.moveTo(0,-6); ctx.bezierCurveTo(-9,-16,-20,-6,0,6); ctx.bezierCurveTo(20,-6,9,-16,0,-6);
+      ctx.closePath(); ctx.fillStyle = '#ff7fa8'; ctx.fill();
       ctx.restore();
     }
   }
 }
 
-/* =====================================================================
-   INPUT HANDLER
-   ===================================================================== */
+/* ═══════════════════════════════════════════════════════════════════
+   INPUT
+═══════════════════════════════════════════════════════════════════ */
 
-class InputHandler {
-  constructor(canvas) {
-    this._canvas = canvas;
-    this.isDown  = false;
-    this.x = 0; this.y = 0;
-    this.prevX = 0; this.prevY = 0;
-    this._onDown = null; this._onMove = null; this._onUp = null;
-
-    canvas.addEventListener('pointerdown',   this._handleDown.bind(this));
-    canvas.addEventListener('pointermove',   this._handleMove.bind(this));
-    canvas.addEventListener('pointerup',     this._handleUp.bind(this));
-    canvas.addEventListener('pointercancel', this._handleUp.bind(this));
-    canvas.style.touchAction = 'none';
+class Input {
+  constructor(el) {
+    this.down = false; this.x = 0; this.y = 0; this.px = 0; this.py = 0;
+    this.onDown = null; this.onMove = null; this.onUp = null;
+    el.style.touchAction = 'none';
+    el.addEventListener('pointerdown',   this._dn.bind(this));
+    el.addEventListener('pointermove',   this._mv.bind(this));
+    el.addEventListener('pointerup',     this._up.bind(this));
+    el.addEventListener('pointercancel', this._up.bind(this));
+    this._el = el;
   }
-  onDown(fn) { this._onDown = fn; }
-  onMove(fn) { this._onMove = fn; }
-  onUp(fn)   { this._onUp   = fn; }
-
-  _pos(e) {
-    const r = this._canvas.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  _pos(e) { const r = this._el.getBoundingClientRect(); return [e.clientX-r.left, e.clientY-r.top]; }
+  _dn(e) {
+    e.preventDefault(); this._el.setPointerCapture(e.pointerId);
+    const [x,y] = this._pos(e); this.px=this.x=x; this.py=this.y=y; this.down=true;
+    if (this.onDown) this.onDown(x, y);
   }
-  _handleDown(e) {
-    e.preventDefault();
-    const p = this._pos(e);
-    this.prevX = this.x = p.x; this.prevY = this.y = p.y;
-    this.isDown = true;
-    this._canvas.setPointerCapture(e.pointerId);
-    if (this._onDown) this._onDown(p.x, p.y);
+  _mv(e) {
+    if (!this.down) return; e.preventDefault();
+    const [x,y] = this._pos(e); this.px=this.x; this.py=this.y; this.x=x; this.y=y;
+    if (this.onMove) this.onMove(x, y, x-this.px, y-this.py);
   }
-  _handleMove(e) {
-    if (!this.isDown) return;
-    e.preventDefault();
-    const p = this._pos(e);
-    this.prevX = this.x; this.prevY = this.y;
-    this.x = p.x; this.y = p.y;
-    if (this._onMove) this._onMove(p.x, p.y, p.x - this.prevX, p.y - this.prevY);
-  }
-  _handleUp(e) {
-    this.isDown = false;
-    if (this._onUp) this._onUp(this.x, this.y);
-  }
+  _up(e) { this.down=false; if (this.onUp) this.onUp(this.x, this.y); }
 }
 
-/* =====================================================================
-   WEBGL BLOOM PASS  (Phase 3 — runs silently, skips if WebGL unavailable)
-   ===================================================================== */
+/* ═══════════════════════════════════════════════════════════════════
+   WEBGL BLOOM
+═══════════════════════════════════════════════════════════════════ */
 
-const _BLOOM_VERT = `
-attribute vec2 a_pos; varying vec2 v_uv;
-void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
-
-const _BLOOM_FRAG = `
-precision mediump float;
-uniform sampler2D u_tex; varying vec2 v_uv;
-void main() {
-  vec4 c = texture2D(u_tex, vec2(v_uv.x, 1.0 - v_uv.y));
-  float b = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
-  gl_FragColor = b > 0.3 ? c * 0.6 : vec4(0.0);
-}`;
-
-class BloomPass {
-  constructor(bloomCanvas, sourceCanvas) {
-    this._src    = sourceCanvas;
-    this._canvas = bloomCanvas;
-    this._ready  = false;
-    this._gl     = null;
-    this._init();
-  }
-  _init() {
-    const gl = this._canvas.getContext('webgl', { alpha: true, premultipliedAlpha: false });
+class Bloom {
+  constructor(canvas, src) {
+    this._src = src; this._c = canvas; this._ok = false;
+    const gl = canvas.getContext('webgl', {alpha:true, premultipliedAlpha:false});
     if (!gl) return;
     this._gl = gl;
-
-    const buf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
-
-    const prog = gl.createProgram();
-    const vert = gl.createShader(gl.VERTEX_SHADER);
-    const frag = gl.createShader(gl.FRAGMENT_SHADER);
-    gl.shaderSource(vert, _BLOOM_VERT); gl.compileShader(vert);
-    gl.shaderSource(frag, _BLOOM_FRAG); gl.compileShader(frag);
-    gl.attachShader(prog, vert); gl.attachShader(prog, frag);
-    gl.linkProgram(prog);
-    this._prog = prog;
-
-    this._tex = gl.createTexture();
-    this._posLoc = gl.getAttribLocation(prog, 'a_pos');
-    this._texLoc = gl.getUniformLocation(prog, 'u_tex');
-    this._ready = true;
+    const V=`attribute vec2 p;varying vec2 v;void main(){v=p*.5+.5;gl_Position=vec4(p,0,1);}`;
+    const F=`precision mediump float;uniform sampler2D t;varying vec2 v;void main(){vec4 c=texture2D(t,vec2(v.x,1.-v.y));float b=dot(c.rgb,vec3(.2126,.7152,.0722));gl_FragColor=b>.28?c*.7:vec4(0);}`;
+    const prog=gl.createProgram();
+    function sh(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);return s;}
+    gl.attachShader(prog,sh(gl.VERTEX_SHADER,V)); gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,F));
+    gl.linkProgram(prog); this._prog=prog;
+    const buf=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
+    this._ploc=gl.getAttribLocation(prog,'p'); this._tloc=gl.getUniformLocation(prog,'t');
+    this._tex=gl.createTexture(); this._ok=true;
   }
+  resize(w,h) { this._c.width=Math.floor(w*.5); this._c.height=Math.floor(h*.5); }
   render() {
-    if (!this._ready) return;
-    const gl = this._gl;
-    gl.viewport(0, 0, this._canvas.width, this._canvas.height);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-
-    gl.bindTexture(gl.TEXTURE_2D, this._tex);
-    try {
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this._src);
-    } catch(e) { return; }
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-
-    gl.useProgram(this._prog);
-    gl.enableVertexAttribArray(this._posLoc);
-    gl.vertexAttribPointer(this._posLoc, 2, gl.FLOAT, false, 0, 0);
-    gl.uniform1i(this._texLoc, 0);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-  }
-  resize(w, h) {
-    this._canvas.width  = Math.floor(w * 0.5);
-    this._canvas.height = Math.floor(h * 0.5);
+    if (!this._ok) return;
+    const gl=this._gl;
+    gl.viewport(0,0,this._c.width,this._c.height); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.bindTexture(gl.TEXTURE_2D,this._tex);
+    try { gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,this._src); } catch(e){return;}
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+    gl.useProgram(this._prog); gl.enableVertexAttribArray(this._ploc);
+    gl.vertexAttribPointer(this._ploc,2,gl.FLOAT,false,0,0);
+    gl.uniform1i(this._tloc,0); gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
   }
 }
 
-/* =====================================================================
-   PINXU — cat mesh, drawing, zones
-   ===================================================================== */
+/* ═══════════════════════════════════════════════════════════════════
+   PINXU — the cat
+═══════════════════════════════════════════════════════════════════ */
 
-const BODY_POINTS  = 24;
-const BODY_RX      = 90;
-const BODY_RY      = 110;
-const FUR_STROKES  = 80;
-const TAIL_SEGS    = 7;
-const WHISKER_LEN  = 52;
+const N_BODY   = 24;
+const RX       = 92;
+const RY       = 112;
+const N_TAIL   = 8;
+const N_FUR    = 120;
 
-// Pre-seeded fur data (golden-angle, deterministic)
-const _furAngles  = [];
-const _furLengths = [];
-for (let i = 0; i < FUR_STROKES; i++) {
-  _furAngles.push(i * 137.508 * Math.PI / 180);
-  _furLengths.push(4 + ((i * 31) % 7) / 7 * 6);
+// Deterministic fur geometry (golden angle)
+const _FA = [], _FL = [], _FP = [];
+for (let i = 0; i < N_FUR; i++) {
+  _FA.push(i * 2.39996);        // angle offset per stroke
+  _FL.push(5 + (i*37%11)/11*9); // length 5-14px
+  _FP.push(i / N_FUR);          // normalized position around ring
 }
-
-const EARS = [
-  { ox: -55, oy: -115, tip: { dx: -25, dy: -38 } },
-  { ox:  55, oy: -115, tip: { dx:  25, dy: -38 } },
-];
 
 class Pinxu {
   constructor(cx, cy) {
     this.cx = cx; this.cy = cy;
     this.body = new VerletBody();
     this.tail = new VerletBody();
-    this._buildBody();
-    this._buildTail();
+    this._initBody();
+    this._initTail();
   }
 
-  _buildBody() {
+  _initBody() {
     const pts = [];
-    for (let i = 0; i < BODY_POINTS; i++) {
-      const angle  = (i / BODY_POINTS) * Math.PI * 2 - Math.PI / 2;
-      const squash = angle > 0 ? 1.08 : 1.0;
-      pts.push(this.body.addPoint(
-        this.cx + Math.cos(angle) * BODY_RX,
-        this.cy + Math.sin(angle) * BODY_RY * squash
+    for (let i = 0; i < N_BODY; i++) {
+      const a = i / N_BODY * Math.PI * 2 - Math.PI / 2;
+      // Widen the belly (lower third) for chubby sitting shape
+      const bellySwell = a > 0.2 && a < Math.PI * 0.9 ? 1.12 : 1.0;
+      pts.push(this.body.add(
+        this.cx + Math.cos(a) * RX * (a > Math.PI*0.6 && a < Math.PI*1.4 ? 0.88 : 1.0),
+        this.cy + Math.sin(a) * RY * bellySwell
       ));
     }
-    this.bodyRing   = pts;
-    this.centerPoint = this.body.addPoint(this.cx, this.cy, false);
+    this.ring   = pts;
+    this.center = this.body.add(this.cx, this.cy);
 
-    for (let i = 0; i < BODY_POINTS; i++)
-      this.body.addConstraint(pts[i], pts[(i + 1) % BODY_POINTS], 0.95);
+    for (let i = 0; i < N_BODY; i++) this.body.link(pts[i], pts[(i+1)%N_BODY], 0.96);
+    for (const p of pts)              this.body.link(this.center, p, 0.28);
+    const h = N_BODY/2;
+    for (let i = 0; i < h; i++)       this.body.link(pts[i], pts[i+h], 0.14);
 
-    for (const p of pts)
-      this.body.addConstraint(this.centerPoint, p, 0.3);
-
-    const half = BODY_POINTS / 2;
-    for (let i = 0; i < half; i++)
-      this.body.addConstraint(pts[i], pts[i + half], 0.15);
-
-    this._restPos    = pts.map(function(p) { return { x: p.x, y: p.y }; });
-    this._centerRest = { x: this.cx, y: this.cy };
+    this._rest = pts.map(p=>({x:p.x,y:p.y}));
+    this._cr   = {x:this.cx, y:this.cy};
   }
 
-  _buildTail() {
-    const sx = this.cx + BODY_RX * 0.7;
-    const sy = this.cy + BODY_RY * 0.5;
+  _initTail() {
+    // Tail curls from right side around the bottom, tip ends near left paw
     const pts = [];
-    for (let i = 0; i < TAIL_SEGS; i++) {
-      const t   = i / (TAIL_SEGS - 1);
-      const ang = Math.PI * 0.1 + t * Math.PI * 0.85;
-      const r   = 55 - t * 10;
-      pts.push(this.tail.addPoint(
-        sx + Math.cos(-ang) * r * t,
-        sy + Math.sin(-ang) * r * t + t * 20,
+    for (let i = 0; i < N_TAIL; i++) {
+      const t   = i / (N_TAIL-1);
+      const ang = -0.1 + t * Math.PI * 1.15;   // sweeps from right → around bottom → slightly left
+      const r   = 70 - t * 22;                  // taper radius
+      const ox  = Math.cos(ang) * r;
+      const oy  = Math.abs(Math.sin(ang)) * r * 0.7 + t * 18;
+      pts.push(this.tail.add(
+        this.cx + RX*0.75 + ox,
+        this.cy + RY*0.55 + oy,
         i === 0
       ));
     }
-    this.tailPoints = pts;
-    for (let i = 0; i < TAIL_SEGS - 1; i++)
-      this.tail.addConstraint(pts[i], pts[i + 1], 0.6);
-    this._tailRest = pts.map(function(p) { return { x: p.x, y: p.y }; });
+    this.tailPts = pts;
+    for (let i = 0; i < N_TAIL-1; i++) this.tail.link(pts[i], pts[i+1], 0.58);
+    this._tailRest = pts.map(p=>({x:p.x,y:p.y}));
   }
 
   update(dt) {
-    this.body.update(dt);
-    this.tail.update(dt);
-    this._softAnchor();
+    this.body.update(); this.tail.update(); this._anchor();
   }
 
-  _softAnchor() {
-    const PULL = 0.04;
-    for (let i = 0; i < this.bodyRing.length; i++) {
-      const p = this.bodyRing[i], r = this._restPos[i];
-      p.x += (r.x - p.x) * PULL;
-      p.y += (r.y - p.y) * PULL;
+  _anchor() {
+    const PULL = 0.042;
+    for (let i = 0; i < this.ring.length; i++) {
+      const p=this.ring[i], r=this._rest[i];
+      p.x += (r.x-p.x)*PULL; p.y += (r.y-p.y)*PULL;
     }
-    this.centerPoint.x += (this._centerRest.x - this.centerPoint.x) * PULL;
-    this.centerPoint.y += (this._centerRest.y - this.centerPoint.y) * PULL;
-
-    // Tail root tracks body
-    const root = this.tailPoints[0];
-    const ref  = this.bodyRing[Math.floor(BODY_POINTS * 0.62)];
-    root.x = ref.x; root.y = ref.y;
-
-    for (let i = 1; i < this.tailPoints.length; i++) {
-      const p = this.tailPoints[i], r = this._tailRest[i];
-      p.x += (r.x - p.x) * 0.025;
-      p.y += (r.y - p.y) * 0.025;
+    this.center.x += (this._cr.x-this.center.x)*PULL;
+    this.center.y += (this._cr.y-this.center.y)*PULL;
+    // Nail tail root to body
+    const root=this.tailPts[0], ref=this.ring[Math.floor(N_BODY*0.61)];
+    root.x=ref.x; root.y=ref.y;
+    for (let i=1; i<this.tailPts.length; i++) {
+      const p=this.tailPts[i],r=this._tailRest[i];
+      p.x+=(r.x-p.x)*0.022; p.y+=(r.y-p.y)*0.022;
     }
   }
 
-  squishAt(px, py, radius, strength) {
-    this.body.squishAt(px, py, radius || 80, strength || 6);
+  squishAt(x,y,r,s) { this.body.squishAt(x,y,r||80,s||6); }
+  pullTail(x,y)      { this.tail.pullAt(x,y,55,3.5); }
+
+  nearTail(x, y) {
+    for (const p of this.tailPts) {
+      if (Math.hypot(x-p.x, y-p.y) < 30) return true;
+    }
+    return false;
   }
 
-  getZone(px, py) {
-    const dx = px - this.cx, dy = py - this.cy;
-    const nx = dx / BODY_RX,  ny = dy / BODY_RY;
-    if (Math.hypot(nx, ny) > 1.15) return 'outside';
-    if (ny < -0.35)                             return 'head';
-    if (ny > -0.1 && ny < 0.5 && Math.abs(nx) < 0.75) return 'belly';
-    if (ny < 0.1 && Math.abs(nx) > 0.4)        return 'cheek';
-    if (ny > 0.55)                              return 'paws';
+  getZone(x, y) {
+    if (this.nearTail(x, y)) return 'tail';
+    const dx=(x-this.cx)/RX, dy=(y-this.cy)/RY;
+    if (Math.hypot(dx,dy)>1.18) return 'outside';
+    if (dy < -0.38)                              return 'head';
+    if (dy > -0.08 && dy < 0.52 && Math.abs(dx)<0.78) return 'belly';
+    if (dy < 0.12 && Math.abs(dx) > 0.42)       return 'cheek';
+    if (dy > 0.58)                               return 'paws';
     return 'body';
   }
 
-  draw(ctx, time) {
+  // ── DRAW ──────────────────────────────────────────────────────────
+
+  draw(ctx, time, breathScale, eyeOpen, earFlick, moodIdx) {
+    const cx=this.cx, cy=this.cy;
     ctx.save();
-    const cx = this.cx, cy = this.cy;
+
+    // Cushion (no breath transform)
     this._drawCushion(ctx, cx, cy);
-    this._drawTail(ctx);
-    this._drawShadow(ctx, cx, cy);
-    this._drawBody(ctx, cx, cy);
+
+    // Tail behind body
+    this._drawTailBehind(ctx);
+
+    // Apply breathing transform around cat center
+    ctx.save();
+    ctx.translate(cx, cy); ctx.scale(1.0, breathScale); ctx.translate(-cx, -cy);
+
+    // Drop shadow
+    ctx.save();
+    ctx.globalAlpha = 0.16;
+    this._path(ctx, 1.06, 10);
+    ctx.fillStyle = '#2a1408'; ctx.fill();
+    ctx.restore();
+
+    // ── Body layers ──
+    // 1. Base near-black fill
+    this._path(ctx, 1.0, 0);
+    ctx.fillStyle = '#080808'; ctx.fill();
+
+    // 2. Volume gradient — light source upper-left
+    this._path(ctx, 1.0, 0);
+    const vg = ctx.createRadialGradient(cx-34, cy-48, 8, cx+10, cy+20, RY*1.3);
+    vg.addColorStop(0,   'rgba(55,55,58,0.92)');
+    vg.addColorStop(0.35,'rgba(22,22,24,0.70)');
+    vg.addColorStop(0.7, 'rgba(8,8,9,0.40)');
+    vg.addColorStop(1,   'rgba(2,2,3,0.0)');
+    ctx.fillStyle = vg; ctx.fill();
+
+    // 3. Rim light — cool blue-ish from upper right (gives depth)
+    this._path(ctx, 1.0, 0);
+    const rl = ctx.createRadialGradient(cx+RX*0.9, cy-RY*0.6, 2, cx+RX*0.5, cy-RY*0.3, RX*1.1);
+    rl.addColorStop(0,   'rgba(80,90,120,0.18)');
+    rl.addColorStop(0.5, 'rgba(40,50,70,0.06)');
+    rl.addColorStop(1,   'rgba(0,0,0,0)');
+    ctx.fillStyle = rl; ctx.fill();
+
+    // 4. Belly warmth — slightly lighter/warmer on belly when content+
+    if (moodIdx >= 3) {
+      this._path(ctx, 1.0, 0);
+      const bw = ctx.createRadialGradient(cx, cy+30, 5, cx, cy+30, 65);
+      const alpha = Math.min(0.12, (moodIdx-2)*0.04);
+      bw.addColorStop(0,   `rgba(60,40,20,${alpha})`);
+      bw.addColorStop(1,   'rgba(0,0,0,0)');
+      ctx.fillStyle = bw; ctx.fill();
+    }
+
+    // 5. Ambient occlusion — darken the very bottom/sides
+    this._path(ctx, 1.0, 0);
+    const ao = ctx.createRadialGradient(cx, cy+RY*0.6, 20, cx, cy+RY*0.2, RY*1.1);
+    ao.addColorStop(0,   'rgba(0,0,0,0.35)');
+    ao.addColorStop(0.5, 'rgba(0,0,0,0.10)');
+    ao.addColorStop(1,   'rgba(0,0,0,0)');
+    ctx.fillStyle = ao; ctx.fill();
+
+    // 6. Fur edge strokes
     this._drawFur(ctx, cx, cy, time);
-    this._drawHighlight(ctx, cx, cy);
-    this._drawEars(ctx, cx, cy);
-    this._drawFace(ctx, cx, cy, time);
+
+    // 7. Specular glint
+    ctx.save();
+    ctx.globalAlpha = 0.09;
+    const sg = ctx.createRadialGradient(cx-28, cy-52, 3, cx-15, cy-28, 50);
+    sg.addColorStop(0, '#ffffff'); sg.addColorStop(1, 'transparent');
+    this._path(ctx, 1.0, 0); ctx.fillStyle = sg; ctx.fill();
+    ctx.restore();
+
+    // Cheek fluff
+    this._drawCheeks(ctx, cx, cy, time);
+
+    // Ears
+    this._drawEars(ctx, cx, cy, earFlick);
+
+    // Face
+    this._drawFace(ctx, cx, cy, time, eyeOpen, moodIdx);
+
+    // Front paws
     this._drawPaws(ctx, cx, cy);
+
+    ctx.restore(); // end breath transform
+
+    // Tail tip in front of body
+    this._drawTailFront(ctx);
+
     ctx.restore();
   }
 
-  _tracePath(ctx, scale, offsetY) {
-    scale   = scale   || 1;
-    offsetY = offsetY || 0;
-    const ring = this.bodyRing, n = ring.length;
-    const cx = this.cx, cy = this.cy;
+  _path(ctx, scale, dy) {
+    const ring=this.ring, n=ring.length, cx=this.cx, cy=this.cy;
     ctx.beginPath();
-    for (let i = 0; i < n; i++) {
-      const curr = ring[i], next = ring[(i + 1) % n];
-      const mx = cx + ((curr.x + next.x) / 2 - cx) * scale;
-      const my = cy + ((curr.y + next.y) / 2 - cy) * scale + offsetY;
-      const qx = cx + (curr.x - cx) * scale;
-      const qy = cy + (curr.y - cy) * scale + offsetY;
-      if (i === 0) ctx.moveTo(mx, my);
-      else         ctx.quadraticCurveTo(qx, qy, mx, my);
+    for (let i=0; i<n; i++) {
+      const a=ring[i], b=ring[(i+1)%n];
+      const mx=cx+(((a.x+b.x)/2)-cx)*scale, my=cy+(((a.y+b.y)/2)-cy)*scale+(dy||0);
+      const qx=cx+(a.x-cx)*scale,            qy=cy+(a.y-cy)*scale+(dy||0);
+      i===0 ? ctx.moveTo(mx,my) : ctx.quadraticCurveTo(qx,qy,mx,my);
     }
     ctx.closePath();
   }
 
-  _drawShadow(ctx, cx, cy) {
-    ctx.save();
-    ctx.globalAlpha = 0.18;
-    this._tracePath(ctx, 1.04, 8);
-    ctx.fillStyle = '#3a2010';
-    ctx.fill();
-    ctx.restore();
-  }
-
-  _drawBody(ctx, cx, cy) {
-    this._tracePath(ctx, 1.0, 0);
-    const g = ctx.createRadialGradient(cx - 20, cy - 30, 10, cx, cy, BODY_RY * 1.1);
-    g.addColorStop(0,   '#262626');
-    g.addColorStop(0.5, '#111111');
-    g.addColorStop(1,   '#060606');
-    ctx.fillStyle = g;
-    ctx.fill();
-  }
-
   _drawFur(ctx, cx, cy, time) {
-    const ring = this.bodyRing, n = ring.length;
+    const ring=this.ring, n=ring.length;
     ctx.save();
-    ctx.globalAlpha = 0.22;
-    ctx.strokeStyle = '#1a1a1a';
-    ctx.lineWidth   = 0.8;
-    for (let i = 0; i < FUR_STROKES; i++) {
-      const ri   = i % n;
-      const p    = ring[ri], next = ring[(ri + 1) % n];
-      const nx   = (p.x + next.x) / 2, ny = (p.y + next.y) / 2;
-      const dx   = nx - cx, dy = ny - cy;
-      const len  = Math.hypot(dx, dy) || 1;
-      const ang  = _furAngles[i] + time * 0.0003 * (i % 3 === 0 ? 1 : -0.5);
-      const fur  = _furLengths[i];
-      const ox   = (dx / len) * fur, oy = (dy / len) * fur;
-      const rx   = ox * Math.cos(ang) - oy * Math.sin(ang);
-      const ry   = ox * Math.sin(ang) + oy * Math.cos(ang);
-      ctx.beginPath();
-      ctx.moveTo(nx, ny);
-      ctx.lineTo(nx + rx * 0.4, ny + ry * 0.4);
-      ctx.stroke();
+    ctx.lineCap = 'round';
+    for (let i=0; i<N_FUR; i++) {
+      const ri   = Math.floor(_FP[i]*n);
+      const a    = ring[ri], b = ring[(ri+1)%n];
+      const mx   = (a.x+b.x)/2, my = (a.y+b.y)/2;
+      const outX = mx-cx, outY = my-cy;
+      const outD = Math.hypot(outX,outY)||1;
+      const ang  = _FA[i] + time*0.00028*(i%2?1:-0.6);
+      const fur  = _FL[i];
+      // Longer fur on cheeks and head crown
+      const normY = (my-cy)/RY;
+      const furMul = normY < -0.3 ? 1.5 : (Math.abs((mx-cx)/RX) > 0.7 ? 1.8 : 1.0);
+      const ox=(outX/outD)*fur*furMul, oy=(outY/outD)*fur*furMul;
+      const rx=ox*Math.cos(ang)-oy*Math.sin(ang);
+      const ry=ox*Math.sin(ang)+oy*Math.cos(ang);
+      // Vary color slightly: some strokes warmer, some cooler
+      const warm = i%7===0;
+      ctx.globalAlpha = 0.18 + (i%5)*0.015;
+      ctx.strokeStyle = warm ? '#2a1f14' : '#141418';
+      ctx.lineWidth   = 0.75 + (i%3)*0.2;
+      ctx.beginPath(); ctx.moveTo(mx,my); ctx.lineTo(mx+rx*0.45, my+ry*0.45); ctx.stroke();
     }
     ctx.restore();
   }
 
-  _drawHighlight(ctx, cx, cy) {
-    ctx.save();
-    ctx.globalAlpha = 0.12;
-    const g = ctx.createRadialGradient(cx - 30, cy - 55, 5, cx - 10, cy - 20, 75);
-    g.addColorStop(0, '#ffffff');
-    g.addColorStop(1, 'transparent');
-    this._tracePath(ctx, 1.0, 0);
-    ctx.fillStyle = g;
-    ctx.fill();
-    ctx.restore();
-  }
-
-  _drawEars(ctx, cx, cy) {
-    for (const ear of EARS) {
-      const bx = cx + ear.ox, by = cy + ear.oy;
-      const tx = bx + ear.tip.dx, ty = by + ear.tip.dy;
-      const side = ear.ox < 0 ? -1 : 1;
-      ctx.beginPath();
-      ctx.moveTo(bx - 18, by + 5);
-      ctx.lineTo(tx, ty);
-      ctx.lineTo(bx + 18, by + 5);
-      ctx.closePath();
-      ctx.fillStyle = '#0a0a0a';
-      ctx.fill();
-
+  _drawCheeks(ctx, cx, cy, time) {
+    // Rounded cheek puffs — chubby cat
+    const cheekY = cy - 18;
+    for (const side of [-1,1]) {
+      const ckx = cx + side * 58;
+      // Cheek mass gradient
       ctx.save();
-      ctx.globalAlpha = 0.7;
-      ctx.beginPath();
-      ctx.moveTo(bx - 9, by + 2);
-      ctx.lineTo(bx + side * 12, by - 22);
-      ctx.lineTo(bx + 9, by + 2);
-      ctx.closePath();
-      ctx.fillStyle = '#c87080';
-      ctx.fill();
+      const cg = ctx.createRadialGradient(ckx, cheekY, 3, ckx, cheekY, 32);
+      cg.addColorStop(0,   'rgba(28,24,20,0.55)');
+      cg.addColorStop(0.6, 'rgba(14,12,10,0.25)');
+      cg.addColorStop(1,   'rgba(0,0,0,0)');
+      ctx.globalAlpha = 1;
+      ctx.beginPath(); ctx.ellipse(ckx, cheekY, 32, 26, 0, 0, Math.PI*2);
+      ctx.fillStyle = cg; ctx.fill();
       ctx.restore();
     }
   }
 
-  _drawFace(ctx, cx, cy, time) {
-    const eyeY = cy - 28;
+  _drawEars(ctx, cx, cy, earFlick) {
+    // earFlick: {side: -1|1, t: 0..1}
+    const ears = [
+      {sx:-1, ox:-52, oy:-118, tipX:-24, tipY:-40},
+      {sx: 1, ox: 52, oy:-118, tipX: 24, tipY:-40},
+    ];
+    for (const e of ears) {
+      ctx.save();
+      // Apply flick rotation around ear base
+      const flickAmt = earFlick && earFlick.side===e.sx ? Math.sin(earFlick.t*Math.PI)*0.22*e.sx : 0;
+      if (flickAmt !== 0) {
+        ctx.translate(cx+e.ox, cy+e.oy);
+        ctx.rotate(flickAmt);
+        ctx.translate(-(cx+e.ox), -(cy+e.oy));
+      }
+      const bx=cx+e.ox, by=cy+e.oy;
+      const tx=bx+e.tipX, ty=by+e.tipY;
 
-    // Closed happy eyes
-    ctx.save();
-    ctx.strokeStyle = '#3a3a3a';
-    ctx.lineWidth   = 2.5;
-    ctx.lineCap     = 'round';
-    for (const side of [-1, 1]) {
+      // Outer ear — fill then subtle outline for fur edge
       ctx.beginPath();
-      ctx.arc(cx + side * 22, eyeY, 7, Math.PI + 0.4, Math.PI * 2 - 0.4, false);
-      ctx.stroke();
+      ctx.moveTo(bx-20, by+6); ctx.lineTo(tx, ty); ctx.lineTo(bx+20, by+6);
+      ctx.closePath();
+      const eg = ctx.createLinearGradient(bx, by+6, tx, ty);
+      eg.addColorStop(0, '#0e0e0e'); eg.addColorStop(1, '#1a1a1a');
+      ctx.fillStyle = eg; ctx.fill();
+
+      // Inner pink triangle
+      ctx.save(); ctx.globalAlpha = 0.75;
+      ctx.beginPath();
+      ctx.moveTo(bx-10, by+3); ctx.lineTo(bx+e.tipX*0.62, by+e.tipY*0.68); ctx.lineTo(bx+10, by+3);
+      ctx.closePath();
+      const pg = ctx.createLinearGradient(bx, by, tx, ty);
+      pg.addColorStop(0, '#d47888'); pg.addColorStop(1, '#a85060');
+      ctx.fillStyle = pg; ctx.fill();
+      ctx.restore();
+
+      // Ear fur tufts at base
+      ctx.save(); ctx.globalAlpha=0.3; ctx.strokeStyle='#1a1818'; ctx.lineWidth=0.9; ctx.lineCap='round';
+      for (let f=-2; f<=2; f++) {
+        const fx=bx+f*5, fy=by+4;
+        ctx.beginPath(); ctx.moveTo(fx,fy); ctx.lineTo(fx+f*1.2, fy-8); ctx.stroke();
+      }
+      ctx.restore();
+
+      ctx.restore();
+    }
+  }
+
+  _drawFace(ctx, cx, cy, time, eyeOpen, moodIdx) {
+    const eyeY   = cy - 30;
+    const spread = 23;
+    const wob    = Math.sin(time*0.0009)*1.4;
+
+    // ── Eyes ──
+    ctx.save();
+    ctx.lineCap = 'round';
+
+    if (eyeOpen < 0.05) {
+      // Closed happy arcs
+      ctx.strokeStyle = '#3d3530'; ctx.lineWidth = 2.8;
+      const smile = moodIdx >= 4 ? 0.25 : 0.38; // wider smile when ecstatic
+      for (const s of [-1,1]) {
+        ctx.beginPath();
+        ctx.arc(cx+s*spread, eyeY, 7.5, Math.PI+smile, Math.PI*2-smile, false);
+        ctx.stroke();
+      }
+    } else {
+      // Open eyes — large yellow-green iris
+      const openR = 9 * eyeOpen;
+      for (const s of [-1,1]) {
+        const ex = cx+s*spread;
+        // Sclera
+        ctx.beginPath(); ctx.arc(ex, eyeY, openR+1.5, 0, Math.PI*2);
+        ctx.fillStyle = '#f0ede0'; ctx.fill();
+        // Iris gradient
+        const ig = ctx.createRadialGradient(ex, eyeY-1, 1, ex, eyeY, openR);
+        ig.addColorStop(0,   '#d4e840');
+        ig.addColorStop(0.45,'#96b820');
+        ig.addColorStop(0.8, '#547010');
+        ig.addColorStop(1,   '#2a3808');
+        ctx.beginPath(); ctx.arc(ex, eyeY, openR, 0, Math.PI*2);
+        ctx.fillStyle = ig; ctx.fill();
+        // Pupil (vertical slit)
+        ctx.save();
+        ctx.beginPath();
+        ctx.ellipse(ex, eyeY, openR*0.22, openR*0.72, 0, 0, Math.PI*2);
+        ctx.fillStyle = '#050505'; ctx.fill();
+        ctx.restore();
+        // Glint
+        ctx.beginPath(); ctx.arc(ex+openR*0.3, eyeY-openR*0.35, openR*0.22, 0, Math.PI*2);
+        ctx.fillStyle = 'rgba(255,255,255,0.88)'; ctx.fill();
+      }
     }
     ctx.restore();
 
-    // Nose
-    ctx.beginPath();
-    ctx.moveTo(cx, cy - 10);
-    ctx.lineTo(cx - 5, cy - 3);
-    ctx.lineTo(cx + 5, cy - 3);
-    ctx.closePath();
-    ctx.fillStyle = '#2a1a1a';
-    ctx.fill();
-
-    // Whiskers
+    // ── Nose ──
     ctx.save();
-    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
-    ctx.lineWidth   = 0.9;
-    ctx.lineCap     = 'round';
-    const wY    = cy - 5;
-    const wob   = Math.sin(time * 0.001) * 1.2;
-    const wAngles = [-15, 0, 15];
-    for (const side of [-1, 1]) {
+    const ng = ctx.createLinearGradient(cx, cy-12, cx, cy-4);
+    ng.addColorStop(0, '#3a1820'); ng.addColorStop(1, '#200c10');
+    ctx.beginPath(); ctx.moveTo(cx,cy-12); ctx.lineTo(cx-5.5,cy-4); ctx.lineTo(cx+5.5,cy-4); ctx.closePath();
+    ctx.fillStyle = ng; ctx.fill();
+    ctx.restore();
+
+    // ── Whiskers ──
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,252,240,0.52)'; ctx.lineWidth = 0.95; ctx.lineCap = 'round';
+    const wAngles = [-18, -3, 14];
+    for (const s of [-1,1]) {
       for (const deg of wAngles) {
-        const rad = (deg * side + wob) * Math.PI / 180;
+        const rad = (deg*s + wob) * Math.PI/180;
+        const len = 56 + Math.abs(deg)*0.4;
         ctx.beginPath();
-        ctx.moveTo(cx + side * 10, wY);
-        ctx.lineTo(cx + side * 10 + Math.cos(rad) * WHISKER_LEN * side,
-                   wY + Math.sin(rad) * WHISKER_LEN);
+        ctx.moveTo(cx+s*12, cy-7);
+        ctx.lineTo(cx+s*12 + Math.cos(rad)*len*s, cy-7 + Math.sin(rad)*len);
         ctx.stroke();
       }
     }
@@ -834,235 +761,302 @@ class Pinxu {
   }
 
   _drawPaws(ctx, cx, cy) {
-    const pawY = cy + BODY_RY * 0.82;
+    const py = cy + RY * 0.80;
     ctx.save();
-    for (const side of [-1, 1]) {
-      const px = cx + side * 28;
-      ctx.beginPath();
-      ctx.ellipse(px, pawY, 18, 12, 0, 0, Math.PI * 2);
-      ctx.fillStyle = '#0d0d0d';
-      ctx.fill();
-      ctx.strokeStyle = '#1a1a1a';
-      ctx.lineWidth   = 1;
-      ctx.beginPath();
-      ctx.moveTo(px - 6, pawY - 3); ctx.lineTo(px - 6, pawY + 4);
-      ctx.moveTo(px,     pawY - 4); ctx.lineTo(px,     pawY + 5);
-      ctx.moveTo(px + 6, pawY - 3); ctx.lineTo(px + 6, pawY + 4);
-      ctx.stroke();
+    for (const s of [-1,1]) {
+      const px = cx + s*30;
+      // Paw base
+      const pg = ctx.createRadialGradient(px, py-3, 2, px, py+2, 20);
+      pg.addColorStop(0, '#1e1e1e'); pg.addColorStop(1, '#090909');
+      ctx.beginPath(); ctx.ellipse(px, py, 20, 13, s*0.08, 0, Math.PI*2);
+      ctx.fillStyle = pg; ctx.fill();
+      // Toe dividers (subtle)
+      ctx.save(); ctx.globalAlpha=0.35; ctx.strokeStyle='#252020'; ctx.lineWidth=1; ctx.lineCap='round';
+      for (const t of [-7,0,7]) {
+        ctx.beginPath(); ctx.moveTo(px+t, py-4); ctx.lineTo(px+t+s*0.5, py+4); ctx.stroke();
+      }
+      ctx.restore();
+      // Tiny highlight
+      ctx.save(); ctx.globalAlpha=0.08;
+      const hl = ctx.createRadialGradient(px-4, py-5, 1, px-2, py-2, 12);
+      hl.addColorStop(0,'#ffffff'); hl.addColorStop(1,'transparent');
+      ctx.beginPath(); ctx.ellipse(px,py,20,13,s*0.08,0,Math.PI*2);
+      ctx.fillStyle=hl; ctx.fill();
+      ctx.restore();
     }
     ctx.restore();
   }
 
-  _drawTail(ctx) {
-    const pts = this.tailPoints;
-    ctx.save();
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    for (let i = 0; i < pts.length - 1; i++) {
-      const t = i / (pts.length - 1);
-      ctx.beginPath();
-      ctx.moveTo(pts[i].x, pts[i].y);
-      ctx.lineTo(pts[i + 1].x, pts[i + 1].y);
-      ctx.strokeStyle = '#0a0a0a';
-      ctx.lineWidth   = 14 - t * 8;
-      ctx.stroke();
+  _drawTailBehind(ctx) {
+    // Draw the first 60% of the tail (behind body)
+    const pts = this.tailPts, n = pts.length;
+    const cutoff = Math.floor(n * 0.62);
+    this._tailSegments(ctx, 0, cutoff);
+  }
+
+  _drawTailFront(ctx) {
+    // Draw the last 40% of the tail (in front of body — creates "wrapped" look)
+    const pts = this.tailPts, n = pts.length;
+    const cutoff = Math.floor(n * 0.62);
+    this._tailSegments(ctx, cutoff, n - 1);
+  }
+
+  _tailSegments(ctx, from, to) {
+    const pts = this.tailPts;
+    ctx.save(); ctx.lineCap='round'; ctx.lineJoin='round';
+    for (let i=from; i<to; i++) {
+      const t = i/(pts.length-1);
+      const w = 15 - t*10;
+      ctx.beginPath(); ctx.moveTo(pts[i].x,pts[i].y); ctx.lineTo(pts[i+1].x,pts[i+1].y);
+      // Color: very dark at root, slightly lighter (blue-tinted) at tip
+      ctx.strokeStyle = t > 0.8 ? '#1a1a22' : '#090909';
+      ctx.lineWidth = Math.max(3, w); ctx.stroke();
     }
-    const tip = pts[pts.length - 1];
-    ctx.beginPath();
-    ctx.arc(tip.x, tip.y, 4, 0, Math.PI * 2);
-    ctx.fillStyle = '#1a1a1a'; ctx.fill();
+    // Tip tuft
+    if (to >= pts.length-1) {
+      const tip = pts[pts.length-1];
+      ctx.beginPath(); ctx.arc(tip.x, tip.y, 5, 0, Math.PI*2);
+      ctx.fillStyle='#1a1a20'; ctx.fill();
+      // Fur wisps at tip
+      ctx.save(); ctx.globalAlpha=0.4; ctx.strokeStyle='#222028'; ctx.lineWidth=1;
+      for (let f=0; f<6; f++) {
+        const a = f/6*Math.PI*2;
+        ctx.beginPath(); ctx.moveTo(tip.x,tip.y); ctx.lineTo(tip.x+Math.cos(a)*7,tip.y+Math.sin(a)*7); ctx.stroke();
+      }
+      ctx.restore();
+    }
     ctx.restore();
   }
 
   _drawCushion(ctx, cx, cy) {
-    const cY  = cy + BODY_RY * 0.75;
-    const cRX = BODY_RX * 1.55;
-    const cRY = 32;
+    const cY=cy+RY*0.74, cRX=RX*1.58, cRY=33;
 
-    // Shadow
-    ctx.save();
-    ctx.globalAlpha = 0.15;
-    ctx.fillStyle   = '#5a3020';
-    ctx.beginPath();
-    ctx.ellipse(cx, cY + 22, cRX * 0.9, 12, 0, 0, Math.PI * 2);
-    ctx.fill();
+    // Floor shadow
+    ctx.save(); ctx.globalAlpha=0.14;
+    const sg=ctx.createRadialGradient(cx,cY+30,5,cx,cY+28,cRX*0.85);
+    sg.addColorStop(0,'#6a3520'); sg.addColorStop(1,'transparent');
+    ctx.beginPath(); ctx.ellipse(cx,cY+24,cRX*0.88,14,0,0,Math.PI*2);
+    ctx.fillStyle=sg; ctx.fill(); ctx.restore();
+
+    // Cushion body — layered gradients for depth
+    const cg1=ctx.createRadialGradient(cx-20,cY-10,5,cx,cY,cRX*1.1);
+    cg1.addColorStop(0,'#f4d4d4'); cg1.addColorStop(0.55,'#e8c0c0'); cg1.addColorStop(1,'#c8a0a0');
+    ctx.beginPath(); ctx.ellipse(cx,cY,cRX,cRY,0,0,Math.PI*2);
+    ctx.fillStyle=cg1; ctx.fill();
+
+    // Cushion side shadow (AO)
+    const ao=ctx.createRadialGradient(cx,cY,cRX*0.5,cx,cY,cRX);
+    ao.addColorStop(0.7,'rgba(0,0,0,0)'); ao.addColorStop(1,'rgba(40,10,10,0.18)');
+    ctx.beginPath(); ctx.ellipse(cx,cY,cRX,cRY,0,0,Math.PI*2);
+    ctx.fillStyle=ao; ctx.fill();
+
+    // Quilted stitching
+    ctx.save(); ctx.globalAlpha=0.38; ctx.strokeStyle='#b89090'; ctx.lineWidth=0.85;
+    for (let row=-1; row<=1; row++) {
+      const y=cY+row*10, hw=Math.sqrt(Math.max(0,1-(row*10/cRY)**2))*cRX;
+      ctx.beginPath(); ctx.moveTo(cx-hw*0.8,y); ctx.lineTo(cx+hw*0.8,y); ctx.stroke();
+    }
+    for (let col=-3; col<=3; col++) {
+      const x=cx+col*28, hh=Math.sqrt(Math.max(0,1-(col*28/cRX)**2))*cRY;
+      ctx.beginPath(); ctx.moveTo(x,cY-hh*0.7); ctx.lineTo(x,cY+hh*0.7); ctx.stroke();
+    }
+    // Stitch dots at intersections
+    ctx.globalAlpha=0.5; ctx.fillStyle='#b89090';
+    for (let row=-1; row<=1; row++) {
+      for (let col=-3; col<=3; col++) {
+        const x=cx+col*28, y=cY+row*10;
+        const inside=(x-cx)**2/cRX**2+(y-cY)**2/cRY**2<0.72;
+        if (inside) { ctx.beginPath(); ctx.arc(x,y,1.5,0,Math.PI*2); ctx.fill(); }
+      }
+    }
     ctx.restore();
 
-    // Body
-    const g = ctx.createRadialGradient(cx, cY - 8, 5, cx, cY, cRX);
-    g.addColorStop(0,   '#f0d0d0');
-    g.addColorStop(0.6, '#e8c5c5');
-    g.addColorStop(1,   '#d4aaaa');
-    ctx.beginPath();
-    ctx.ellipse(cx, cY, cRX, cRY, 0, 0, Math.PI * 2);
-    ctx.fillStyle = g; ctx.fill();
-
-    // Stitching
-    ctx.save();
-    ctx.strokeStyle = '#c8a8a8'; ctx.lineWidth = 0.8; ctx.globalAlpha = 0.5;
-    for (let row = -1; row <= 1; row++) {
-      const y  = cY + row * 10;
-      const hw = Math.sqrt(Math.max(0, 1 - (row * 10 / cRY) ** 2)) * cRX;
-      ctx.beginPath(); ctx.moveTo(cx - hw * 0.85, y); ctx.lineTo(cx + hw * 0.85, y); ctx.stroke();
-    }
-    for (let col = -3; col <= 3; col++) {
-      const x  = cx + col * 28;
-      const hh = Math.sqrt(Math.max(0, 1 - (col * 28 / cRX) ** 2)) * cRY;
-      ctx.beginPath(); ctx.moveTo(x, cY - hh * 0.75); ctx.lineTo(x, cY + hh * 0.75); ctx.stroke();
-    }
-    ctx.restore();
-
-    // Rim
-    ctx.save();
-    ctx.globalAlpha = 0.3; ctx.strokeStyle = '#f8e0e0'; ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.ellipse(cx, cY - 4, cRX * 0.85, cRY * 0.55, 0, Math.PI * 1.1, Math.PI * 1.9);
-    ctx.stroke();
+    // Rim highlight (top edge catches light)
+    ctx.save(); ctx.globalAlpha=0.45;
+    const rim=ctx.createLinearGradient(cx-cRX*0.7,cY-cRY,cx+cRX*0.7,cY-cRY+5);
+    rim.addColorStop(0,'rgba(255,230,230,0)'); rim.addColorStop(0.3,'rgba(255,230,230,0.9)');
+    rim.addColorStop(0.7,'rgba(255,230,230,0.9)'); rim.addColorStop(1,'rgba(255,230,230,0)');
+    ctx.strokeStyle=rim; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.ellipse(cx,cY,cRX*0.88,cRY*0.58,0,Math.PI*1.08,Math.PI*1.92); ctx.stroke();
     ctx.restore();
   }
 }
 
-/* =====================================================================
-   MAIN — canvas setup, game loop
-   ===================================================================== */
+/* ═══════════════════════════════════════════════════════════════════
+   MAIN
+═══════════════════════════════════════════════════════════════════ */
 
 const mainCanvas  = document.getElementById('main-canvas');
 const bloomCanvas = document.getElementById('bloom-canvas');
-const ctx2d       = mainCanvas.getContext('2d');
+const ctx         = mainCanvas.getContext('2d');
 
-let W = 0, H = 0, dpr = 1;
-let pinxu = null;
-let bloom  = null;
+let W=0, H=0, dpr=1, pinxu=null, bloom=null;
 
 function resize() {
-  dpr = window.devicePixelRatio || 1;
-  W   = window.innerWidth;
-  H   = window.innerHeight;
-
-  mainCanvas.width  = Math.round(W * dpr);
-  mainCanvas.height = Math.round(H * dpr);
-  mainCanvas.style.width  = W + 'px';
-  mainCanvas.style.height = H + 'px';
-
-  bloomCanvas.style.width  = W + 'px';
-  bloomCanvas.style.height = H + 'px';
-
-  ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-  const catX = W * 0.5;
-  const catY = H * 0.52;
-
+  dpr=window.devicePixelRatio||1; W=window.innerWidth; H=window.innerHeight;
+  mainCanvas.width=Math.round(W*dpr); mainCanvas.height=Math.round(H*dpr);
+  mainCanvas.style.width=W+'px'; mainCanvas.style.height=H+'px';
+  bloomCanvas.style.width=W+'px'; bloomCanvas.style.height=H+'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  const cx=W*0.5, cy=H*0.52;
   if (!pinxu) {
-    pinxu = new Pinxu(catX, catY);
+    pinxu = new Pinxu(cx, cy);
   } else {
-    const dx = catX - pinxu.cx;
-    const dy = catY - pinxu.cy;
-    pinxu.cx = catX; pinxu.cy = catY;
-    for (const p of pinxu.body.points)  { p.x += dx; p.y += dy; p.oldX += dx; p.oldY += dy; }
-    for (const p of pinxu.tail.points)  { p.x += dx; p.y += dy; p.oldX += dx; p.oldY += dy; }
-    for (const r of pinxu._restPos)     { r.x += dx; r.y += dy; }
-    for (const r of pinxu._tailRest)    { r.x += dx; r.y += dy; }
-    pinxu._centerRest.x += dx; pinxu._centerRest.y += dy;
+    const dx=cx-pinxu.cx, dy=cy-pinxu.cy;
+    pinxu.cx=cx; pinxu.cy=cy;
+    for (const p of pinxu.body.points) { p.x+=dx;p.y+=dy;p.oldX+=dx;p.oldY+=dy; }
+    for (const p of pinxu.tail.points) { p.x+=dx;p.y+=dy;p.oldX+=dx;p.oldY+=dy; }
+    for (const r of pinxu._rest)    { r.x+=dx;r.y+=dy; }
+    for (const r of pinxu._tailRest){ r.x+=dx;r.y+=dy; }
+    pinxu._cr.x+=dx; pinxu._cr.y+=dy;
   }
-
-  if (bloom) bloom.resize(W, H);
+  if (bloom) bloom.resize(W,H);
 }
-
 window.addEventListener('resize', resize);
 resize();
 
-bloom = new BloomPass(bloomCanvas, mainCanvas);
+bloom = new Bloom(bloomCanvas, mainCanvas);
 bloom.resize(W, H);
 
-// Systems
-const particles = new ParticleSystem();
+const particles = new Particles();
 const mood      = new MoodState();
 const purr      = new PurringEngine();
-const input     = new InputHandler(mainCanvas);
+const input     = new Input(mainCanvas);
 
-let audioStarted = false;
-function ensureAudio() {
-  if (!audioStarted) { unlockAudio(); purr.start(); audioStarted = true; }
-}
+// ── Animation state ──
+let eyeOpen     = 0, eyeTarget = 0;
+let audioOn     = false;
+let earFlick    = null;   // null or {side, t}
+let earTimer    = 18000 + Math.random()*12000;
+let tailWagTimer= 7000  + Math.random()*3000;
+let swishCooldown = 0;
 
-// Input handlers
-input.onDown(function(x, y) {
+function ensureAudio() { if (!audioOn) { unlockAudio(); purr.start(); audioOn=true; } }
+
+// ── Input ──
+input.onDown = function(x, y) {
   ensureAudio();
   const zone = pinxu.getZone(x, y);
-  if (zone !== 'outside') mood.interact(zone === 'head' ? 1.5 : 1);
-
+  if (zone !== 'outside') {
+    mood.interact(zone==='head'?1.6:1);
+    // First interaction — open eyes briefly
+    eyeTarget = 1;
+    setTimeout(function(){ eyeTarget = 0; }, 900);
+    hint.classList.remove('visible');
+    hintShown = true;
+  }
   if (zone === 'belly') {
-    pinxu.squishAt(x, y, 90, 7);
+    pinxu.squishAt(x, y, 92, 7.5);
     playBloop();
     if (navigator.vibrate) navigator.vibrate(10);
-    if (mood.spawnHearts) particles.spawn(x, y - 20, 'heart');
+    if (mood.spawnHearts) particles.emit(x, y-25);
   } else if (zone === 'head') {
-    pinxu.squishAt(x, y, 60, 3);
+    pinxu.squishAt(x, y, 62, 3.5);
   } else if (zone === 'cheek') {
-    pinxu.squishAt(x, y, 50, 4);
+    pinxu.squishAt(x, y, 52, 4.5);
     playMrrp();
     if (navigator.vibrate) navigator.vibrate(30);
   } else if (zone === 'paws') {
-    pinxu.squishAt(x, y, 35, 2);
+    pinxu.squishAt(x, y, 36, 2);
     playTch();
   }
-});
+};
 
-input.onMove(function(x, y, dx, dy) {
-  if (!input.isDown) return;
+input.onMove = function(x, y, dx, dy) {
+  if (!input.down) return;
   const zone = pinxu.getZone(x, y);
-  if (zone === 'head' || zone === 'body' || zone === 'belly') {
-    mood.interact(0.4);
+  if (zone === 'tail') {
+    pinxu.pullTail(x, y);
+    swishCooldown -= 16;
     const speed = Math.hypot(dx, dy);
-    pinxu.squishAt(x, y, 55, speed * 0.4);
-    purr.setVolume(mood.purrVolume);
+    if (swishCooldown <= 0 && speed > 2) { playSwish(speed); swishCooldown = 120; }
+    mood.interact(0.3);
+  } else if (zone !== 'outside') {
+    mood.interact(0.45);
+    const spd = Math.hypot(dx, dy);
+    pinxu.squishAt(x, y, 58, spd * 0.35);
+    purr.setVol(mood.purrVol);
   }
-});
+};
 
-input.onUp(function() {
-  purr.setVolume(mood.purrVolume * 0.5);
-});
+input.onUp = function() { purr.setVol(mood.purrVol * 0.55); };
 
-// Hint text
+// ── Hint ──
 const hint = document.getElementById('hint');
-setTimeout(function() { hint.classList.add('visible'); setTimeout(function() { hint.classList.remove('visible'); }, 4000); }, 30000);
+let hintShown = false;
+setTimeout(function(){
+  if (!hintShown) { hint.classList.add('visible'); setTimeout(function(){ hint.classList.remove('visible'); }, 4500); }
+}, 30000);
 
-// Share button
-document.getElementById('share-btn').addEventListener('click', function() {
-  if (navigator.share) {
-    navigator.share({ title: 'SquishPets', text: 'Pinxu is the softest cat alive 🖤 squishpets.web/', url: location.href }).catch(function() {});
-  }
+// ── Share ──
+document.getElementById('share-btn').addEventListener('click', function(){
+  if (navigator.share) navigator.share({title:'SquishPets',text:'Pinxu is the softest cat alive 🖤 squishpets.web/',url:location.href}).catch(function(){});
 });
 
-// Game loop
-let lastTime = performance.now();
+// ── Game loop ──
+let lastT = performance.now();
 
-function loop(timestamp) {
-  const dt = Math.min((timestamp - lastTime) / 1000, 0.05);
-  lastTime  = timestamp;
+function loop(ts) {
+  const dt = Math.min((ts - lastT) / 1000, 0.05);
+  lastT = ts;
 
+  // Update systems
   mood.update();
   pinxu.update(dt);
+  purr.setVol(mood.purrVol);
   purr.update(dt);
-  purr.setVolume(mood.purrVolume);
   particles.update(dt);
+  swishCooldown -= dt * 1000;
 
-  // --- Draw ---
-  ctx2d.clearRect(0, 0, W, H);
+  // Eye animation
+  eyeOpen += (eyeTarget - eyeOpen) * Math.min(1, dt * 9);
 
-  const bgGrad = ctx2d.createLinearGradient(0, 0, 0, H);
-  bgGrad.addColorStop(0, '#f5ede0');
-  bgGrad.addColorStop(1, '#e8d0b8');
-  ctx2d.fillStyle = bgGrad;
-  ctx2d.fillRect(0, 0, W, H);
+  // Ear flick idle
+  earTimer -= dt * 1000;
+  if (earTimer <= 0) {
+    earFlick = { side: Math.random()>0.5?1:-1, t:0 };
+    earTimer = 16000 + Math.random()*14000;
+  }
+  if (earFlick) {
+    earFlick.t += dt * 3.5;
+    if (earFlick.t >= 1) earFlick = null;
+  }
 
-  // Subtle parallax
-  ctx2d.save();
-  ctx2d.translate((input.x / W - 0.5) * 3, (input.y / H - 0.5) * 2);
-  pinxu.draw(ctx2d, timestamp);
-  ctx2d.restore();
+  // Tail wag idle
+  tailWagTimer -= dt * 1000;
+  if (tailWagTimer <= 0) {
+    const tip = pinxu.tailPts[pinxu.tailPts.length - 2];
+    tip.applyImpulse((Math.random()-0.5)*5, -Math.random()*3.5);
+    tailWagTimer = 6000 + Math.random()*4000;
+  }
 
-  particles.draw(ctx2d);
+  // ── Draw ──
+  ctx.clearRect(0,0,W,H);
 
+  // Background — warm layered gradient
+  const bg = ctx.createLinearGradient(0,0,0,H);
+  bg.addColorStop(0,   '#f8eedf');
+  bg.addColorStop(0.45,'#f0e2cc');
+  bg.addColorStop(1,   '#e4ceae');
+  ctx.fillStyle = bg; ctx.fillRect(0,0,W,H);
+
+  // Subtle vignette
+  const vig = ctx.createRadialGradient(W/2,H/2,H*0.25,W/2,H/2,H*0.78);
+  vig.addColorStop(0,'rgba(0,0,0,0)'); vig.addColorStop(1,'rgba(30,18,8,0.22)');
+  ctx.fillStyle=vig; ctx.fillRect(0,0,W,H);
+
+  // Parallax offset (very subtle)
+  const px = (input.x/W-0.5)*3.5, py = (input.y/H-0.5)*2.5;
+  ctx.save(); ctx.translate(px, py);
+
+  // Breathing scale
+  const breathPhase = ts * 0.001 * mood.breathRate * Math.PI * 2;
+  const breathScale = 1 + Math.sin(breathPhase) * 0.015;
+
+  pinxu.draw(ctx, ts, breathScale, eyeOpen, earFlick, mood.idx);
+  ctx.restore();
+
+  particles.draw(ctx);
   bloom.render();
 
   requestAnimationFrame(loop);
