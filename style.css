@@ -1,0 +1,88 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg-top: #f5ede0;
+  --bg-bottom: #e8d5c0;
+  --ui-color: #8a7a6a;
+  --font: 'Fredoka', sans-serif;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  touch-action: none;
+  background: linear-gradient(to bottom, var(--bg-top), var(--bg-bottom));
+  font-family: var(--font);
+}
+
+#main-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+#bloom-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: 0.45;
+}
+
+#ui {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 18px 20px;
+  pointer-events: none;
+}
+
+#wordmark {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--ui-color);
+  letter-spacing: 0.04em;
+  opacity: 0.85;
+}
+
+#share-btn {
+  pointer-events: all;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--ui-color);
+  opacity: 0.7;
+  padding: 8px;
+  border-radius: 50%;
+  transition: opacity 0.2s;
+  display: flex;
+  align-items: center;
+}
+
+#share-btn:hover { opacity: 1; }
+
+#hint {
+  position: absolute;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--ui-color);
+  font-size: 0.9rem;
+  opacity: 0;
+  pointer-events: none;
+  text-align: center;
+  transition: opacity 1.5s ease;
+  white-space: nowrap;
+}
+
+#hint.visible { opacity: 0.55; }
