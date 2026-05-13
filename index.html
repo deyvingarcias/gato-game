@@ -401,62 +401,61 @@ FurSystem.prototype._bilerp = function(sx, sy) {
 };
 
 FurSystem.prototype._build = function(oc) {
-  var iw=oc.width, ih=oc.height, data;
-  try { data=oc.getContext('2d').getImageData(0,0,iw,ih).data; }
-  catch(e) { console.warn('Fur: pixel read blocked (tainted canvas — serve via HTTP)'); return; }
-
-  function al(x,y){ if(x<0||x>=iw||y<0||y>=ih) return 0; return data[(y*iw+x)*4+3]; }
-  function shuf(a){ for(var i=a.length-1;i>0;i--){var j=0|Math.random()*(i+1),t=a[i];a[i]=a[j];a[j]=t;} return a; }
-
-  var border=[], inner=[], step=3;
-  for (var y=step; y<ih-step; y+=step) {
-    for (var x=step; x<iw-step; x+=step) {
-      if (al(x,y)<60) continue;
-      if (al(x-step,y)<60||al(x+step,y)<60||al(x,y-step)<60||al(x,y+step)<60)
-        border.push({x:x,y:y});
-      else if (Math.random()<0.11) inner.push({x:x,y:y});
-    }
-  }
-  shuf(border); shuf(inner);
-  var nb=Math.min(Math.floor(FUR_N*0.62), border.length);
-  var pts=border.slice(0,nb).concat(inner.slice(0, Math.min(FUR_N-nb, inner.length)));
-
+  var iw=oc.width, ih=oc.height;
+  // Approximate Pinxu silhouette as an ellipse — no pixel reading needed
+  var ecx=iw*0.5, ecy=ih*0.5, erx=iw*0.42, ery=ih*0.48;
+  var nb=Math.floor(FUR_N*0.62), ni=FUR_N-nb;
   var COLS=['#1a1a2e','#1a1a2e','#1c1c30','#222236','#2a2a3e'];
+  var self=this;
 
-  for (var i=0; i<pts.length; i++) {
-    var px=pts[i].x, py=pts[i].y;
-    var gx=al(px+2,py)-al(px-2,py), gy=al(px,py+2)-al(px,py-2), gm=Math.hypot(gx,gy);
-    var nx, ny;
-    if (gm>6) { nx=-gx/gm; ny=-gy/gm; }
-    else {
-      var ddx=px-iw*0.5, ddy=py-ih*0.5, dm=Math.hypot(ddx,ddy)||1;
-      nx=(ddx/dm)*0.4+(Math.random()-0.5); ny=(ddy/dm)*0.4+(Math.random()-0.5);
-      var nm=Math.hypot(nx,ny)||1; nx/=nm; ny/=nm;
-    }
+  function push(px,py,nx,ny) {
     var len=5.5+Math.random()*6.5;
-    var bp=this._bilerp(px,py);
+    var bp=self._bilerp(px,py);
     var tx0=bp[0]+nx*len, ty0=bp[1]+ny*len;
-    this.hairs.push({
+    self.hairs.push({
       sx:px, sy:py, nx:nx, ny:ny, len:len,
       tx:tx0, ty:ty0, otx:tx0, oty:ty0,
       bx:bp[0], by:bp[1],
       col:COLS[0|Math.random()*COLS.length],
-      cs: Math.random()<0.5?1:-1,
-      alpha: 0.52+Math.random()*0.26,
-      wp: Math.random()*Math.PI*2,
-      wf: 0.38+Math.random()*0.54
+      cs:Math.random()<0.5?1:-1,
+      alpha:0.52+Math.random()*0.26,
+      wp:Math.random()*Math.PI*2,
+      wf:0.38+Math.random()*0.54
     });
+  }
+
+  // Border hairs — ring around ellipse perimeter with radial jitter
+  for (var i=0; i<nb; i++) {
+    var t=(i/nb)*Math.PI*2+(Math.random()-0.5)*0.14;
+    var jr=0.88+Math.random()*0.24;
+    var px=ecx+Math.cos(t)*erx*jr;
+    var py=ecy+Math.sin(t)*ery*jr;
+    var dx=px-ecx, dy=py-ecy, dm=Math.hypot(dx,dy)||1;
+    push(px, py, dx/dm, dy/dm);
+  }
+
+  // Interior hairs — uniform distribution inside ellipse, noisier normals
+  for (var j=0; j<ni; j++) {
+    var t2=Math.random()*Math.PI*2;
+    var r=Math.sqrt(Math.random())*0.82;
+    var px2=ecx+Math.cos(t2)*erx*r;
+    var py2=ecy+Math.sin(t2)*ery*r;
+    var dx2=px2-ecx, dy2=py2-ecy, dm2=Math.hypot(dx2,dy2)||1;
+    var nx=dx2/dm2*0.45+(Math.random()-0.5)*1.2;
+    var ny=dy2/dm2*0.45+(Math.random()-0.5)*1.2;
+    var nm=Math.hypot(nx,ny)||1;
+    push(px2, py2, nx/nm, ny/nm);
   }
 
   // Pre-sort into color groups for batched rendering (fewer draw calls)
   var cmap={};
-  for (var i=0; i<this.hairs.length; i++) {
-    var col=this.hairs[i].col;
+  for (var k=0; k<this.hairs.length; k++) {
+    var col=this.hairs[k].col;
     if (!cmap[col]) cmap[col]=[];
-    cmap[col].push(i);
+    cmap[col].push(k);
   }
   var ckeys=Object.keys(cmap);
-  for (var k=0; k<ckeys.length; k++) this._cgroups.push({col:ckeys[k], idx:cmap[ckeys[k]]});
+  for (var m=0; m<ckeys.length; m++) this._cgroups.push({col:ckeys[m], idx:cmap[ckeys[m]]});
 };
 
 FurSystem.prototype.setCursor = function(x,y,vx,vy) {
