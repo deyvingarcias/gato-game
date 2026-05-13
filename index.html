@@ -78,9 +78,13 @@ function drawTriTex(ctx, img,
   var a=(dx01*sy02-dx02*sy01)/det, b=(dy01*sy02-dy02*sy01)/det;
   var c=(dx02*sx01-dx01*sx02)/det, d=(dy02*sx01-dy01*sx02)/det;
   var e=dx0-a*sx0-c*sy0,          f=dy0-b*sx0-d*sy0;
+  // Expand clip polygon 0.6px outward from centroid to cover seam gaps between triangles
+  var tcx=(dx0+dx1+dx2)/3, tcy=(dy0+dy1+dy2)/3;
+  function ep(x,y){ var dd=Math.hypot(x-tcx,y-tcy)||1; return [x+(x-tcx)/dd*0.6, y+(y-tcy)/dd*0.6]; }
+  var p0=ep(dx0,dy0), p1=ep(dx1,dy1), p2=ep(dx2,dy2);
   ctx.save();
   ctx.beginPath();
-  ctx.moveTo(dx0,dy0); ctx.lineTo(dx1,dy1); ctx.lineTo(dx2,dy2);
+  ctx.moveTo(p0[0],p0[1]); ctx.lineTo(p1[0],p1[1]); ctx.lineTo(p2[0],p2[1]);
   ctx.closePath(); ctx.clip();
   ctx.transform(a,b,c,d,e,f);
   ctx.drawImage(img, 0, 0);
@@ -212,88 +216,7 @@ Object.defineProperty(MoodState.prototype,'purrVol',    {get:function(){ return 
 Object.defineProperty(MoodState.prototype,'breathRate', {get:function(){ return [0.38,0.48,0.54,0.60,0.76,1.02][this.idx]; }});
 Object.defineProperty(MoodState.prototype,'spawnHearts',{get:function(){ return this.idx>=MOOD_IDX['content']; }});
 
-/* ═══════════════════════════════════════════════════════════════════
-   AUDIO
-═══════════════════════════════════════════════════════════════════ */
-
-var _actx = null;
-function getAC() { if (!_actx) _actx=new (window.AudioContext||window.webkitAudioContext)(); return _actx; }
-function unlockAudio() { var c=getAC(); if (c.state==='suspended') c.resume(); }
-
-function playBloop() {
-  var c=getAC(), t=c.currentTime;
-  var o=c.createOscillator(), g=c.createGain(), f=c.createBiquadFilter();
-  o.type='sine'; o.frequency.setValueAtTime(220,t); o.frequency.exponentialRampToValueAtTime(78,t+0.22);
-  f.type='lowpass'; f.frequency.value=380;
-  g.gain.setValueAtTime(0.38,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.3);
-  o.connect(f); f.connect(g); g.connect(c.destination); o.start(t); o.stop(t+0.32);
-}
-function playMrrp() {
-  var c=getAC(), t=c.currentTime;
-  var o=c.createOscillator(), g=c.createGain();
-  var lfo=c.createOscillator(), lg=c.createGain();
-  o.type='triangle'; o.frequency.setValueAtTime(580,t); o.frequency.exponentialRampToValueAtTime(380,t+0.16);
-  lfo.frequency.value=20; lg.gain.value=14;
-  lfo.connect(lg); lg.connect(o.frequency); lfo.start(t); lfo.stop(t+0.16);
-  g.gain.setValueAtTime(0.22,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.19);
-  o.connect(g); g.connect(c.destination); o.start(t); o.stop(t+0.2);
-}
-function playTch() {
-  var c=getAC(), t=c.currentTime;
-  var sr=c.sampleRate, len=Math.floor(sr*0.032);
-  var buf=c.createBuffer(1,len,sr), d=buf.getChannelData(0);
-  for (var i=0;i<len;i++) d[i]=Math.random()*2-1;
-  var src=c.createBufferSource(); src.buffer=buf;
-  var f=c.createBiquadFilter(); f.type='highpass'; f.frequency.value=2200;
-  var g=c.createGain(); g.gain.setValueAtTime(0.07,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.04);
-  src.connect(f); f.connect(g); g.connect(c.destination); src.start(t);
-}
-function playSwish(speed) {
-  var c=getAC(), t=c.currentTime;
-  var sr=c.sampleRate, len=Math.floor(sr*0.12);
-  var buf=c.createBuffer(1,len,sr), d=buf.getChannelData(0), last=0;
-  for (var i=0;i<len;i++) { last=(last+0.04*(Math.random()*2-1))/1.04; d[i]=last*4; }
-  var src=c.createBufferSource(); src.buffer=buf;
-  var f=c.createBiquadFilter(); f.type='bandpass';
-  f.frequency.setValueAtTime(600+speed*8,t); f.frequency.linearRampToValueAtTime(300,t+0.12); f.Q.value=1.2;
-  var g=c.createGain(); var vol=Math.min(0.18,speed*0.006);
-  g.gain.setValueAtTime(vol,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.14);
-  src.connect(f); f.connect(g); g.connect(c.destination); src.start(t);
-}
-
-function PurringEngine() { this._on=false; this._master=null; this._vol=0; this._target=0; }
-PurringEngine.prototype.start = function() {
-  if (this._on) return; this._on=true;
-  var c=getAC();
-  var master=c.createGain(); master.gain.value=0; master.connect(c.destination);
-  this._master=master;
-  var freqs=[25,50,75,100], amps=[1.0,0.5,0.28,0.16];
-  freqs.forEach(function(f,i){
-    var o=c.createOscillator(), g=c.createGain();
-    o.type='sine'; o.frequency.value=f; g.gain.value=amps[i]*0.14;
-    o.connect(g); g.connect(master); o.start();
-  });
-  var lfo=c.createOscillator(), lg=c.createGain();
-  lfo.frequency.value=1.5; lg.gain.value=0.38;
-  lfo.connect(lg); lg.connect(master.gain); lfo.start();
-  var nlen=c.sampleRate*2, nb=c.createBuffer(1,nlen,c.sampleRate), nd=nb.getChannelData(0);
-  for (var i=0;i<nlen;i++) nd[i]=Math.random()*2-1;
-  var nl=c.createBufferSource(); nl.buffer=nb; nl.loop=true;
-  var nf=c.createBiquadFilter(); nf.type='bandpass'; nf.frequency.value=700; nf.Q.value=0.9;
-  var ng=c.createGain(); ng.gain.value=0.022;
-  nl.connect(nf); nf.connect(ng); ng.connect(master); nl.start();
-  var ab=c.createBuffer(1,nlen,c.sampleRate), ad=ab.getChannelData(0), lv=0;
-  for (var j=0;j<nlen;j++) { lv=(lv+0.02*(Math.random()*2-1))/1.02; ad[j]=lv*3.5; }
-  var al=c.createBufferSource(); al.buffer=ab; al.loop=true;
-  var ag=c.createGain(); ag.gain.value=0.005;
-  al.connect(ag); ag.connect(c.destination); al.start();
-};
-PurringEngine.prototype.setVol = function(v) { this._target=Math.max(0,Math.min(1,v)); };
-PurringEngine.prototype.update = function(dt) {
-  if (!this._master) return;
-  this._vol+=(this._target-this._vol)*Math.min(1,dt*2.2);
-  this._master.gain.value=this._vol*0.62;
-};
+/* audio removed — will be added later with real mp3 files */
 
 /* ═══════════════════════════════════════════════════════════════════
    PARTICLE SYSTEM — hearts
@@ -653,18 +576,12 @@ if (pinxuImg.complete && pinxuImg.naturalWidth > 0) {
 
 var particles  = new Particles();
 var mood       = new MoodState();
-var purr       = new PurringEngine();
 var input      = new Input(mainCanvas);
 
 var eyeTarget   = 0;
-var audioOn     = false;
-var swishCD     = 0;
-
-function ensureAudio() { if (!audioOn) { unlockAudio(); purr.start(); audioOn=true; } }
 
 // ── Input handlers ──
 input.onDown = function(x, y) {
-  ensureAudio();
   if (!mesh) return;
   var zone = mesh.getZone(x, y);
   if (zone !== 'outside') {
@@ -674,7 +591,6 @@ input.onDown = function(x, y) {
   }
   if (zone==='belly') {
     mesh.squishAt(x, y, mesh.dw*0.40, 10);
-    playBloop();
     if (navigator.vibrate) navigator.vibrate(10);
     if (mood.spawnHearts) {
       var n = mood.idx>=5?5:3;
@@ -684,11 +600,9 @@ input.onDown = function(x, y) {
     mesh.squishAt(x, y, mesh.dw*0.28, 5);
   } else if (zone==='cheek') {
     mesh.squishAt(x, y, mesh.dw*0.24, 6);
-    playMrrp();
     if (navigator.vibrate) navigator.vibrate(30);
   } else if (zone==='paws') {
     mesh.squishAt(x, y, mesh.dw*0.18, 3);
-    playTch();
   }
 };
 
@@ -699,13 +613,9 @@ input.onMove = function(x, y, dx, dy) {
     mood.interact(0.45);
     var spd = Math.hypot(dx, dy);
     mesh.squishAt(x, y, mesh.dw*0.30, spd*0.38);
-    purr.setVol(mood.purrVol);
-    if (swishCD<=0 && spd>3 && zone==='paws') {
-      playSwish(spd); swishCD=140;
-    }
   }
 };
-input.onUp = function() { purr.setVol(mood.purrVol*0.55); };
+input.onUp = function() {};
 
 // ── Hint ──
 var hint      = document.getElementById('hint');
@@ -736,10 +646,7 @@ function loop(ts) {
 
   mood.update();
   if (mesh) mesh.update();
-  purr.setVol(mood.purrVol);
-  purr.update(dt);
   particles.update(dt);
-  swishCD -= dt*1000;
 
   // Update butterflies
   for (var i=0; i<butterflies.length; i++) butterflies[i].update(ts);
