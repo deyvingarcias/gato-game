@@ -371,6 +371,145 @@ Bloom.prototype.render = function() {
 };
 
 /* ═══════════════════════════════════════════════════════════════════
+   FUR SYSTEM — interactive hair simulation
+═══════════════════════════════════════════════════════════════════ */
+
+var FUR_N      = 800;
+var FUR_DAMP   = 0.72;
+var FUR_SPRING = 0.18;
+var FUR_RAD    = 40;
+
+function FurSystem(offCanvas, meshBody) {
+  this.mesh    = meshBody;
+  this.hairs   = [];
+  this._cgroups = [];
+  this.curX = -9999; this.curY = -9999;
+  this.cvx  = 0;     this.cvy  = 0;
+  this._build(offCanvas);
+}
+
+FurSystem.prototype._bilerp = function(sx, sy) {
+  var m=this.mesh, sw=m.dw/GCOLS, sh=m.dh/GROWS;
+  var c=Math.min(Math.floor(sx/sw),GCOLS-1), r=Math.min(Math.floor(sy/sh),GROWS-1);
+  var u=(sx-c*sw)/sw, v=(sy-r*sh)/sh;
+  var p00=m.pts[m._idx(r,  c)],  p10=m.pts[m._idx(r,  c+1)];
+  var p01=m.pts[m._idx(r+1,c)],  p11=m.pts[m._idx(r+1,c+1)];
+  return [
+    p00.x*(1-u)*(1-v)+p10.x*u*(1-v)+p01.x*(1-u)*v+p11.x*u*v,
+    p00.y*(1-u)*(1-v)+p10.y*u*(1-v)+p01.y*(1-u)*v+p11.y*u*v
+  ];
+};
+
+FurSystem.prototype._build = function(oc) {
+  var iw=oc.width, ih=oc.height, data;
+  try { data=oc.getContext('2d').getImageData(0,0,iw,ih).data; }
+  catch(e) { console.warn('Fur: pixel read blocked (tainted canvas — serve via HTTP)'); return; }
+
+  function al(x,y){ if(x<0||x>=iw||y<0||y>=ih) return 0; return data[(y*iw+x)*4+3]; }
+  function shuf(a){ for(var i=a.length-1;i>0;i--){var j=0|Math.random()*(i+1),t=a[i];a[i]=a[j];a[j]=t;} return a; }
+
+  var border=[], inner=[], step=3;
+  for (var y=step; y<ih-step; y+=step) {
+    for (var x=step; x<iw-step; x+=step) {
+      if (al(x,y)<60) continue;
+      if (al(x-step,y)<60||al(x+step,y)<60||al(x,y-step)<60||al(x,y+step)<60)
+        border.push({x:x,y:y});
+      else if (Math.random()<0.11) inner.push({x:x,y:y});
+    }
+  }
+  shuf(border); shuf(inner);
+  var nb=Math.min(Math.floor(FUR_N*0.62), border.length);
+  var pts=border.slice(0,nb).concat(inner.slice(0, Math.min(FUR_N-nb, inner.length)));
+
+  var COLS=['#1a1a2e','#1a1a2e','#1c1c30','#222236','#2a2a3e'];
+
+  for (var i=0; i<pts.length; i++) {
+    var px=pts[i].x, py=pts[i].y;
+    var gx=al(px+2,py)-al(px-2,py), gy=al(px,py+2)-al(px,py-2), gm=Math.hypot(gx,gy);
+    var nx, ny;
+    if (gm>6) { nx=-gx/gm; ny=-gy/gm; }
+    else {
+      var ddx=px-iw*0.5, ddy=py-ih*0.5, dm=Math.hypot(ddx,ddy)||1;
+      nx=(ddx/dm)*0.4+(Math.random()-0.5); ny=(ddy/dm)*0.4+(Math.random()-0.5);
+      var nm=Math.hypot(nx,ny)||1; nx/=nm; ny/=nm;
+    }
+    var len=5.5+Math.random()*6.5;
+    var bp=this._bilerp(px,py);
+    var tx0=bp[0]+nx*len, ty0=bp[1]+ny*len;
+    this.hairs.push({
+      sx:px, sy:py, nx:nx, ny:ny, len:len,
+      tx:tx0, ty:ty0, otx:tx0, oty:ty0,
+      bx:bp[0], by:bp[1],
+      col:COLS[0|Math.random()*COLS.length],
+      cs: Math.random()<0.5?1:-1,
+      alpha: 0.52+Math.random()*0.26,
+      wp: Math.random()*Math.PI*2,
+      wf: 0.38+Math.random()*0.54
+    });
+  }
+
+  // Pre-sort into color groups for batched rendering (fewer draw calls)
+  var cmap={};
+  for (var i=0; i<this.hairs.length; i++) {
+    var col=this.hairs[i].col;
+    if (!cmap[col]) cmap[col]=[];
+    cmap[col].push(i);
+  }
+  var ckeys=Object.keys(cmap);
+  for (var k=0; k<ckeys.length; k++) this._cgroups.push({col:ckeys[k], idx:cmap[ckeys[k]]});
+};
+
+FurSystem.prototype.setCursor = function(x,y,vx,vy) {
+  this.curX=x; this.curY=y; this.cvx=vx; this.cvy=vy;
+};
+
+FurSystem.prototype.update = function(ts) {
+  var cx=this.curX, cy=this.curY, cvx=this.cvx, cvy=this.cvy;
+  var spd=Math.hypot(cvx,cvy), R=FUR_RAD, R2=R*R, wt=ts*0.001;
+  for (var i=0; i<this.hairs.length; i++) {
+    var h=this.hairs[i];
+    var bp=this._bilerp(h.sx,h.sy); h.bx=bp[0]; h.by=bp[1];
+    // Rest position with idle wind
+    var wind =Math.sin(wt*h.wf+h.wp)*0.45;
+    var windP=Math.cos(wt*h.wf*0.7+h.wp)*0.22;
+    var rx=h.bx+h.nx*h.len+(-h.ny)*wind+h.nx*windP;
+    var ry=h.by+h.ny*h.len+  h.nx*wind+h.ny*windP;
+    // Verlet integrate
+    var vx=(h.tx-h.otx)*FUR_DAMP, vy=(h.ty-h.oty)*FUR_DAMP;
+    h.otx=h.tx; h.oty=h.ty; h.tx+=vx; h.ty+=vy;
+    // Spring toward rest
+    h.tx+=(rx-h.tx)*FUR_SPRING; h.ty+=(ry-h.ty)*FUR_SPRING;
+    // Cursor push
+    var ddx=h.bx-cx, ddy=h.by-cy, dd2=ddx*ddx+ddy*ddy;
+    if (dd2<R2 && spd>0.3) {
+      var f=(1-Math.sqrt(dd2)/R)*Math.min(spd*0.20,2.5);
+      h.tx+=cvx*f; h.ty+=cvy*f;
+    }
+  }
+};
+
+FurSystem.prototype.draw = function(ctx, breathScale, mcx, mcy) {
+  ctx.save();
+  ctx.translate(mcx,mcy); ctx.scale(1,breathScale); ctx.translate(-mcx,-mcy);
+  ctx.lineWidth=1; ctx.lineCap='round';
+  for (var g=0; g<this._cgroups.length; g++) {
+    var grp=this._cgroups[g];
+    ctx.strokeStyle=grp.col;
+    ctx.globalAlpha=0.62;
+    ctx.beginPath();
+    for (var j=0; j<grp.idx.length; j++) {
+      var h=this.hairs[grp.idx[j]];
+      var cpx=(h.bx+h.tx)*0.5 - h.ny*1.8*h.cs;
+      var cpy=(h.by+h.ty)*0.5 + h.nx*1.8*h.cs;
+      ctx.moveTo(h.bx,h.by);
+      ctx.quadraticCurveTo(cpx,cpy,h.tx,h.ty);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+};
+
+/* ═══════════════════════════════════════════════════════════════════
    DECORATIVE BACKGROUND — flowers & butterflies
 ═══════════════════════════════════════════════════════════════════ */
 
@@ -498,6 +637,7 @@ var offCtx = offImg.getContext('2d');
 
 var mesh   = null;
 var bloom  = null;
+var fur    = null;
 var butterflies = [];
 
 function resize() {
@@ -549,6 +689,7 @@ function initWithImage() {
 
   var cx = W*0.5, cy = H*0.50;
   mesh = new MeshBody(cx, cy, dw, dh);
+  fur  = new FurSystem(offImg, mesh);
 
   bloom.resize(W, H);
 
@@ -617,6 +758,23 @@ input.onMove = function(x, y, dx, dy) {
 };
 input.onUp = function() {};
 
+// ── Fur cursor tracking (hover + drag) ──
+(function() {
+  var prevX=-9999, prevY=-9999;
+  mainCanvas.addEventListener('pointermove', function(e) {
+    if (!fur) return;
+    var r=mainCanvas.getBoundingClientRect();
+    var nx=e.clientX-r.left, ny=e.clientY-r.top;
+    fur.setCursor(nx, ny, nx-prevX, ny-prevY);
+    prevX=nx; prevY=ny;
+  });
+  mainCanvas.addEventListener('pointerleave', function() {
+    if (!fur) return;
+    fur.setCursor(-9999,-9999,0,0);
+    prevX=-9999; prevY=-9999;
+  });
+})();
+
 // ── Hint ──
 var hint      = document.getElementById('hint');
 var hintShown = false;
@@ -646,6 +804,7 @@ function loop(ts) {
 
   mood.update();
   if (mesh) mesh.update();
+  if (fur)  fur.update(ts);
   particles.update(dt);
 
   // Update butterflies
@@ -696,6 +855,11 @@ function loop(ts) {
   // Pinxu image with mesh warping
   if (mesh && offImg.width>0) {
     mesh.draw(ctx, offImg, breathScale);
+  }
+
+  // Fur layer (on top of image, inside parallax transform)
+  if (fur && fur.hairs.length>0) {
+    fur.draw(ctx, breathScale, mesh.cx, mesh.cy);
   }
 
   ctx.restore();
