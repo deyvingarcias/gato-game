@@ -272,6 +272,7 @@ var Drop = (function() {
       var a = _get();
       a.currentTime = 0;
       a.play().catch(function() {});
+      setTimeout(function() { a.pause(); a.currentTime = 0; }, 300);
     }
   };
 })();
