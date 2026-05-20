@@ -58,6 +58,9 @@
   </div>
   <div id="hint">Try petting the belly...</div>
   <img id="pinxu-img" src="assets/pinxu.png" style="display:none" alt="">
+  <audio id="purr-audio"    src="sounds/purr.mp3"    loop preload="auto"></audio>
+  <audio id="drop-audio"    src="sounds/drop.mp3"    preload="auto"></audio>
+  <audio id="ambient-audio" src="sounds/ambient.mp3" loop preload="auto"></audio>
 
 <script>
 'use strict';
@@ -216,7 +219,81 @@ Object.defineProperty(MoodState.prototype,'purrVol',    {get:function(){ return 
 Object.defineProperty(MoodState.prototype,'breathRate', {get:function(){ return [0.38,0.48,0.54,0.60,0.76,1.02][this.idx]; }});
 Object.defineProperty(MoodState.prototype,'spawnHearts',{get:function(){ return this.idx>=MOOD_IDX['content']; }});
 
-/* audio removed — will be added later with real mp3 files */
+/* ═══════════════════════════════════════════════════════════════════
+   PURR — <audio> element with rAF volume fades
+═══════════════════════════════════════════════════════════════════ */
+
+var Purr = (function() {
+  var _aud = null, _vol = 0, _rafId = null;
+
+  function _aud_() {
+    if (!_aud) { _aud = document.getElementById('purr-audio'); _aud.volume = 0; }
+    return _aud;
+  }
+
+  function _fade(to, ms, cb) {
+    if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
+    var t0 = performance.now(), v0 = _vol, dv = to - v0;
+    function step(now) {
+      var p = Math.min((now - t0) / ms, 1);
+      _vol = v0 + dv * p;
+      _aud_().volume = Math.max(0, Math.min(1, _vol));
+      if (p < 1) { _rafId = requestAnimationFrame(step); }
+      else { _vol = to; _rafId = null; if (cb) cb(); }
+    }
+    _rafId = requestAnimationFrame(step);
+  }
+
+  return {
+    touch: function() {
+      var a = _aud_();
+      if (a.paused) a.play().catch(function() {});
+      _fade(0.6, 300);
+    },
+    release: function() {
+      if (!_aud) return;
+      _fade(0, 800, function() { if (_vol <= 0.001) _aud.pause(); });
+    }
+  };
+})();
+
+/* ═══════════════════════════════════════════════════════════════════
+   DROP — single water-drop click sound
+═══════════════════════════════════════════════════════════════════ */
+
+var Drop = (function() {
+  var _aud = null;
+  function _get() {
+    if (!_aud) { _aud = document.getElementById('drop-audio'); _aud.volume = 0.4; }
+    return _aud;
+  }
+  return {
+    play: function() {
+      var a = _get();
+      a.currentTime = 0;
+      a.play().catch(function() {});
+    }
+  };
+})();
+
+/* ═══════════════════════════════════════════════════════════════════
+   AMBIENT — lofi background music, starts on first user gesture
+═══════════════════════════════════════════════════════════════════ */
+
+var Ambient = (function() {
+  var _aud = null, _started = false;
+  function _get() {
+    if (!_aud) { _aud = document.getElementById('ambient-audio'); _aud.volume = 0.15; }
+    return _aud;
+  }
+  return {
+    unlock: function() {
+      if (_started) return;
+      _started = true;
+      _get().play().catch(function() {});
+    }
+  };
+})();
 
 /* ═══════════════════════════════════════════════════════════════════
    PARTICLE SYSTEM — hearts
@@ -228,7 +305,7 @@ function Particle() { this.alive=false; }
 Particle.prototype.spawn = function(x, y) {
   this.x=x; this.y=y;
   this.vx=(Math.random()-0.5)*2.4; this.vy=-2.4-Math.random()*1.8;
-  this.life=0; this.maxLife=1600+Math.random()*800;
+  this.life=0; this.maxLife=1100+Math.random()*400;
   this.scale=0.45+Math.random()*0.65;
   this.rot=(Math.random()-0.5)*0.5;
   this.rotSpeed=(Math.random()-0.5)*0.04;
@@ -236,7 +313,7 @@ Particle.prototype.spawn = function(x, y) {
   this.alive=true;
 };
 
-function Particles() { this._pool=Array.from({length:40},function(){ return new Particle(); }); }
+function Particles() { this._pool=Array.from({length:20},function(){ return new Particle(); }); }
 Particles.prototype.emit = function(x, y) { var p=this._pool.find(function(p){ return !p.alive; }); if (p) p.spawn(x,y); };
 Particles.prototype.update = function(dt) {
   for (var i=0;i<this._pool.length;i++) {
@@ -371,144 +448,6 @@ Bloom.prototype.render = function() {
 };
 
 /* ═══════════════════════════════════════════════════════════════════
-   FUR SYSTEM — interactive hair simulation
-═══════════════════════════════════════════════════════════════════ */
-
-var FUR_N      = 800;
-var FUR_DAMP   = 0.72;
-var FUR_SPRING = 0.18;
-var FUR_RAD    = 40;
-
-function FurSystem(offCanvas, meshBody) {
-  this.mesh    = meshBody;
-  this.hairs   = [];
-  this._cgroups = [];
-  this.curX = -9999; this.curY = -9999;
-  this.cvx  = 0;     this.cvy  = 0;
-  this._build(offCanvas);
-}
-
-FurSystem.prototype._bilerp = function(sx, sy) {
-  var m=this.mesh, sw=m.dw/GCOLS, sh=m.dh/GROWS;
-  var c=Math.min(Math.floor(sx/sw),GCOLS-1), r=Math.min(Math.floor(sy/sh),GROWS-1);
-  var u=(sx-c*sw)/sw, v=(sy-r*sh)/sh;
-  var p00=m.pts[m._idx(r,  c)],  p10=m.pts[m._idx(r,  c+1)];
-  var p01=m.pts[m._idx(r+1,c)],  p11=m.pts[m._idx(r+1,c+1)];
-  return [
-    p00.x*(1-u)*(1-v)+p10.x*u*(1-v)+p01.x*(1-u)*v+p11.x*u*v,
-    p00.y*(1-u)*(1-v)+p10.y*u*(1-v)+p01.y*(1-u)*v+p11.y*u*v
-  ];
-};
-
-FurSystem.prototype._build = function(oc) {
-  var iw=oc.width, ih=oc.height;
-  // Approximate Pinxu silhouette as an ellipse — no pixel reading needed
-  var ecx=iw*0.5, ecy=ih*0.5, erx=iw*0.42, ery=ih*0.48;
-  var nb=Math.floor(FUR_N*0.62), ni=FUR_N-nb;
-  var COLS=['#1a1a2e','#1a1a2e','#1c1c30','#222236','#2a2a3e'];
-  var self=this;
-
-  function push(px,py,nx,ny) {
-    var len=5.5+Math.random()*6.5;
-    var bp=self._bilerp(px,py);
-    var tx0=bp[0]+nx*len, ty0=bp[1]+ny*len;
-    self.hairs.push({
-      sx:px, sy:py, nx:nx, ny:ny, len:len,
-      tx:tx0, ty:ty0, otx:tx0, oty:ty0,
-      bx:bp[0], by:bp[1],
-      col:COLS[0|Math.random()*COLS.length],
-      cs:Math.random()<0.5?1:-1,
-      alpha:0.52+Math.random()*0.26,
-      wp:Math.random()*Math.PI*2,
-      wf:0.38+Math.random()*0.54
-    });
-  }
-
-  // Border hairs — ring around ellipse perimeter with radial jitter
-  for (var i=0; i<nb; i++) {
-    var t=(i/nb)*Math.PI*2+(Math.random()-0.5)*0.14;
-    var jr=0.88+Math.random()*0.24;
-    var px=ecx+Math.cos(t)*erx*jr;
-    var py=ecy+Math.sin(t)*ery*jr;
-    var dx=px-ecx, dy=py-ecy, dm=Math.hypot(dx,dy)||1;
-    push(px, py, dx/dm, dy/dm);
-  }
-
-  // Interior hairs — uniform distribution inside ellipse, noisier normals
-  for (var j=0; j<ni; j++) {
-    var t2=Math.random()*Math.PI*2;
-    var r=Math.sqrt(Math.random())*0.82;
-    var px2=ecx+Math.cos(t2)*erx*r;
-    var py2=ecy+Math.sin(t2)*ery*r;
-    var dx2=px2-ecx, dy2=py2-ecy, dm2=Math.hypot(dx2,dy2)||1;
-    var nx=dx2/dm2*0.45+(Math.random()-0.5)*1.2;
-    var ny=dy2/dm2*0.45+(Math.random()-0.5)*1.2;
-    var nm=Math.hypot(nx,ny)||1;
-    push(px2, py2, nx/nm, ny/nm);
-  }
-
-  // Pre-sort into color groups for batched rendering (fewer draw calls)
-  var cmap={};
-  for (var k=0; k<this.hairs.length; k++) {
-    var col=this.hairs[k].col;
-    if (!cmap[col]) cmap[col]=[];
-    cmap[col].push(k);
-  }
-  var ckeys=Object.keys(cmap);
-  for (var m=0; m<ckeys.length; m++) this._cgroups.push({col:ckeys[m], idx:cmap[ckeys[m]]});
-};
-
-FurSystem.prototype.setCursor = function(x,y,vx,vy) {
-  this.curX=x; this.curY=y; this.cvx=vx; this.cvy=vy;
-};
-
-FurSystem.prototype.update = function(ts) {
-  var cx=this.curX, cy=this.curY, cvx=this.cvx, cvy=this.cvy;
-  var spd=Math.hypot(cvx,cvy), R=FUR_RAD, R2=R*R, wt=ts*0.001;
-  for (var i=0; i<this.hairs.length; i++) {
-    var h=this.hairs[i];
-    var bp=this._bilerp(h.sx,h.sy); h.bx=bp[0]; h.by=bp[1];
-    // Rest position with idle wind
-    var wind =Math.sin(wt*h.wf+h.wp)*0.45;
-    var windP=Math.cos(wt*h.wf*0.7+h.wp)*0.22;
-    var rx=h.bx+h.nx*h.len+(-h.ny)*wind+h.nx*windP;
-    var ry=h.by+h.ny*h.len+  h.nx*wind+h.ny*windP;
-    // Verlet integrate
-    var vx=(h.tx-h.otx)*FUR_DAMP, vy=(h.ty-h.oty)*FUR_DAMP;
-    h.otx=h.tx; h.oty=h.ty; h.tx+=vx; h.ty+=vy;
-    // Spring toward rest
-    h.tx+=(rx-h.tx)*FUR_SPRING; h.ty+=(ry-h.ty)*FUR_SPRING;
-    // Cursor push
-    var ddx=h.bx-cx, ddy=h.by-cy, dd2=ddx*ddx+ddy*ddy;
-    if (dd2<R2 && spd>0.3) {
-      var f=(1-Math.sqrt(dd2)/R)*Math.min(spd*0.20,2.5);
-      h.tx+=cvx*f; h.ty+=cvy*f;
-    }
-  }
-};
-
-FurSystem.prototype.draw = function(ctx, breathScale, mcx, mcy) {
-  ctx.save();
-  ctx.translate(mcx,mcy); ctx.scale(1,breathScale); ctx.translate(-mcx,-mcy);
-  ctx.lineWidth=1; ctx.lineCap='round';
-  for (var g=0; g<this._cgroups.length; g++) {
-    var grp=this._cgroups[g];
-    ctx.strokeStyle=grp.col;
-    ctx.globalAlpha=0.62;
-    ctx.beginPath();
-    for (var j=0; j<grp.idx.length; j++) {
-      var h=this.hairs[grp.idx[j]];
-      var cpx=(h.bx+h.tx)*0.5 - h.ny*1.8*h.cs;
-      var cpy=(h.by+h.ty)*0.5 + h.nx*1.8*h.cs;
-      ctx.moveTo(h.bx,h.by);
-      ctx.quadraticCurveTo(cpx,cpy,h.tx,h.ty);
-    }
-    ctx.stroke();
-  }
-  ctx.restore();
-};
-
-/* ═══════════════════════════════════════════════════════════════════
    DECORATIVE BACKGROUND — flowers & butterflies
 ═══════════════════════════════════════════════════════════════════ */
 
@@ -636,7 +575,6 @@ var offCtx = offImg.getContext('2d');
 
 var mesh   = null;
 var bloom  = null;
-var fur    = null;
 var butterflies = [];
 
 function resize() {
@@ -688,7 +626,6 @@ function initWithImage() {
 
   var cx = W*0.5, cy = H*0.50;
   mesh = new MeshBody(cx, cy, dw, dh);
-  fur  = new FurSystem(offImg, mesh);
 
   bloom.resize(W, H);
 
@@ -719,23 +656,29 @@ var mood       = new MoodState();
 var input      = new Input(mainCanvas);
 
 var eyeTarget   = 0;
+var _pressX = 0, _pressY = 0, _pressTime = 0;
 
 // ── Input handlers ──
 input.onDown = function(x, y) {
+  _pressX = x; _pressY = y; _pressTime = performance.now();
+  Ambient.unlock();
   if (!mesh) return;
   var zone = mesh.getZone(x, y);
   if (zone !== 'outside') {
     mood.interact(zone==='head'?1.6:1);
     eyeTarget=1; setTimeout(function(){ eyeTarget=0; }, 900);
     hint.classList.remove('visible'); hintShown=true;
+    // Heart on every touch, extra hearts when happy
+    particles.emit(x+(Math.random()-0.5)*30, y-10-Math.random()*15);
+    if (mood.spawnHearts) {
+      var n = mood.idx>=5?3:1;
+      for (var i=0;i<n;i++) particles.emit(x+(Math.random()-0.5)*44, y-14-Math.random()*18);
+    }
+    Purr.touch();
   }
   if (zone==='belly') {
     mesh.squishAt(x, y, mesh.dw*0.40, 10);
     if (navigator.vibrate) navigator.vibrate(10);
-    if (mood.spawnHearts) {
-      var n = mood.idx>=5?5:3;
-      for (var i=0;i<n;i++) particles.emit(x+(Math.random()-0.5)*50, y-15-Math.random()*20);
-    }
   } else if (zone==='head') {
     mesh.squishAt(x, y, mesh.dw*0.28, 5);
   } else if (zone==='cheek') {
@@ -753,26 +696,18 @@ input.onMove = function(x, y, dx, dy) {
     mood.interact(0.45);
     var spd = Math.hypot(dx, dy);
     mesh.squishAt(x, y, mesh.dw*0.30, spd*0.38);
+    // Occasional heart while dragging
+    if (Math.random() < 0.10) particles.emit(x+(Math.random()-0.5)*28, y-8-Math.random()*12);
   }
 };
-input.onUp = function() {};
-
-// ── Fur cursor tracking (hover + drag) ──
-(function() {
-  var prevX=-9999, prevY=-9999;
-  mainCanvas.addEventListener('pointermove', function(e) {
-    if (!fur) return;
-    var r=mainCanvas.getBoundingClientRect();
-    var nx=e.clientX-r.left, ny=e.clientY-r.top;
-    fur.setCursor(nx, ny, nx-prevX, ny-prevY);
-    prevX=nx; prevY=ny;
-  });
-  mainCanvas.addEventListener('pointerleave', function() {
-    if (!fur) return;
-    fur.setCursor(-9999,-9999,0,0);
-    prevX=-9999; prevY=-9999;
-  });
-})();
+input.onUp = function(x, y) {
+  var tap = (performance.now() - _pressTime) < 200 && Math.hypot(x - _pressX, y - _pressY) < 5;
+  if (tap && mesh) {
+    var zone = mesh.getZone(x, y);
+    if (zone !== 'outside') Drop.play();
+  }
+  Purr.release();
+};
 
 // ── Hint ──
 var hint      = document.getElementById('hint');
@@ -803,7 +738,6 @@ function loop(ts) {
 
   mood.update();
   if (mesh) mesh.update();
-  if (fur)  fur.update(ts);
   particles.update(dt);
 
   // Update butterflies
@@ -854,11 +788,6 @@ function loop(ts) {
   // Pinxu image with mesh warping
   if (mesh && offImg.width>0) {
     mesh.draw(ctx, offImg, breathScale);
-  }
-
-  // Fur layer (on top of image, inside parallax transform)
-  if (fur && fur.hairs.length>0) {
-    fur.draw(ctx, breathScale, mesh.cx, mesh.cy);
   }
 
   ctx.restore();
